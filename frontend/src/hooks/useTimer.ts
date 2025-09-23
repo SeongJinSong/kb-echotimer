@@ -181,18 +181,23 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
   }, [timer, userId, handleError]);
 
   /**
-   * 타이머 완료 처리
+   * 타이머 정지 처리
    */
   const completeTimer = useCallback(async () => {
     if (!timer) return;
     
     try {
-      webSocketService.completeTimer(timer.timerId);
-      console.log('✅ 타이머 완료 알림 전송');
+      // 1. 화면에서 먼저 타이머를 정지 상태로 변경
+      setTimer(prev => prev ? { ...prev, completed: true } : null);
+      setRemainingSeconds(0);
+      
+      // 2. 그 다음 서버에 정지 알림 전송
+      webSocketService.completeTimer(timer.timerId, userId);
+      console.log('✅ 타이머 정지: 화면 업데이트 완료, 서버 알림 전송');
     } catch (err) {
-      handleError(err, '타이머 완료');
+      handleError(err, '타이머 정지');
     }
-  }, [timer, handleError]);
+  }, [timer, userId, handleError]);
 
   /**
    * WebSocket 연결
@@ -282,6 +287,8 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
       return;
     }
 
+    let hasCompletedOnce = false; // 완료 이벤트 중복 방지
+
     const updateRemainingTime = () => {
       const now = new Date().getTime();
       const target = new Date(timer.targetTime).getTime();
@@ -289,15 +296,16 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
       
       setRemainingSeconds(remaining);
       
-      // 타이머가 완료되었을 때
-      if (remaining === 0 && !timer.completed) {
+      // 타이머가 완료되었을 때 (한 번만 실행)
+      if (remaining === 0 && !timer.completed && !hasCompletedOnce) {
+        hasCompletedOnce = true;
         completeTimer();
       }
     };
 
     // 즉시 실행
     updateRemainingTime();
-    
+
     // 1초마다 업데이트
     intervalRef.current = setInterval(updateRemainingTime, 1000);
 

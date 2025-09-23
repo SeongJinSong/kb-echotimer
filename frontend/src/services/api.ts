@@ -117,6 +117,75 @@ export class TimerApiService {
     const response: AxiosResponse<TimestampEntry[]> = await apiClient.get(`/timers/${timerId}/history`);
     return response.data;
   }
+
+  /**
+   * 특정 사용자의 타임스탬프 히스토리 조회
+   * @param timerId 타이머 ID
+   * @param userId 사용자 ID
+   * @returns 사용자별 타임스탬프 목록
+   */
+  static async getUserTimerHistory(timerId: string, userId: string): Promise<TimestampEntry[]> {
+    const response: AxiosResponse<TimestampEntry[]> = await apiClient.get(`/timers/${timerId}/history/${userId}`);
+    return response.data;
+  }
+
+  // ==================== Redis 디버그 API ====================
+  
+  /**
+   * 모든 Redis 키 조회
+   */
+  static async getRedisKeys(pattern: string = '*'): Promise<string[]> {
+    const response: AxiosResponse<string[]> = await apiClient.get(`/debug/redis/keys?pattern=${pattern}`);
+    return response.data;
+  }
+
+  /**
+   * 특정 타이머의 온라인 사용자 목록 조회
+   */
+  static async getTimerUsers(timerId: string): Promise<any> {
+    const response: AxiosResponse<any> = await apiClient.get(`/debug/redis/timer/${timerId}/users`);
+    return response.data;
+  }
+
+  /**
+   * 모든 타이머의 온라인 사용자 현황 조회
+   */
+  static async getAllTimerUsers(): Promise<any[]> {
+    const response: AxiosResponse<any[]> = await apiClient.get(`/debug/redis/timers/all-users`);
+    return response.data;
+  }
+
+  /**
+   * Redis 통계 조회
+   */
+  static async getRedisStats(): Promise<any> {
+    const response: AxiosResponse<any> = await apiClient.get(`/debug/redis/stats`);
+    return response.data;
+  }
+
+  /**
+   * 특정 Redis 키 값 조회
+   */
+  static async getRedisKeyValue(key: string): Promise<any> {
+    const response: AxiosResponse<any> = await apiClient.get(`/debug/redis/key/${encodeURIComponent(key)}`);
+    return response.data;
+  }
+
+  /**
+   * 특정 Redis 키 삭제
+   */
+  static async deleteRedisKey(key: string): Promise<any> {
+    const response: AxiosResponse<any> = await apiClient.delete(`/debug/redis/key/${encodeURIComponent(key)}`);
+    return response.data;
+  }
+
+  /**
+   * 특정 타이머에서 사용자 강제 제거
+   */
+  static async removeUserFromTimer(timerId: string, userId: string): Promise<any> {
+    const response: AxiosResponse<any> = await apiClient.delete(`/debug/redis/timer/${timerId}/user/${userId}`);
+    return response.data;
+  }
 }
 
 /**

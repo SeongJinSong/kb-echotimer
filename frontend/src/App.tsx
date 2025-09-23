@@ -315,15 +315,21 @@ function App() {
             
             {/* 타이머 정보 */}
             <Box mt={3} textAlign="center">
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                타이머 소유자: {timer.ownerId}
-              </Typography>
-              <Stack direction="row" alignItems="center" justifyContent="center" spacing={1}>
+              <Stack spacing={1} alignItems="center">
+                <Typography variant="body2" color="text.secondary">
+                  타이머 소유자: {timer.ownerId}
+                </Typography>
+                <Typography variant="body2" color="primary.main" fontWeight="medium">
+                  현재 사용자: {userId}
+                </Typography>
+              </Stack>
+              
+              <Stack direction="row" alignItems="center" justifyContent="center" spacing={1} mt={1}>
                 <Typography variant="body2" color="text.secondary">
                   목표 시간: {new Date(timer.targetTime).toLocaleString('ko-KR')}
                 </Typography>
-                {/* 소유자만 기준 시각 수정 가능 */}
-                {timer.userRole === 'OWNER' && (
+                {/* 소유자만 기준 시각 수정 가능하고, 타이머가 완료되지 않았을 때만 */}
+                {timer.userRole === 'OWNER' && !isCompleted && (
                   <Button
                     size="small"
                     variant="outlined"
@@ -339,6 +345,7 @@ function App() {
             {/* 타임스탬프 목록 */}
             <TimestampList 
               timerId={timer.timerId} 
+              userId={userId}
               refreshTrigger={timestampRefreshTrigger}
             />
           </Box>

@@ -199,7 +199,10 @@ export class WebSocketService {
     
     this.client.publish({
       destination,
-      body: JSON.stringify(request)
+      body: JSON.stringify(request),
+      headers: {
+        userId: request.userId // userId를 헤더로 전달
+      }
     });
   }
 
@@ -219,26 +222,33 @@ export class WebSocketService {
     
     this.client.publish({
       destination,
-      body: JSON.stringify(request)
+      body: JSON.stringify(request),
+      headers: {
+        userId: request.changedBy // userId를 헤더로 전달
+      }
     });
   }
 
   /**
    * 타이머 완료 메시지 전송
    * @param timerId 타이머 ID
+   * @param userId 사용자 ID
    */
-  completeTimer(timerId: string): void {
+  completeTimer(timerId: string, userId: string): void {
     if (!this.client || !this.isConnected) {
       console.warn('⚠️ WebSocket이 연결되지 않았습니다.');
       return;
     }
 
     const destination = `/app/timer/${timerId}/complete`;
-    console.log('📤 타이머 완료 알림:', destination);
+    console.log('📤 타이머 정지 알림:', destination, { userId });
     
     this.client.publish({
       destination,
-      body: JSON.stringify({})
+      body: JSON.stringify({}),
+      headers: {
+        userId: userId // userId를 헤더로 전달
+      }
     });
   }
 

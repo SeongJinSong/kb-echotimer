@@ -28,12 +28,15 @@ import { TimerApiService } from '../services/api';
 interface TimestampListProps {
   /** 타이머 ID */
   timerId: string;
+  /** 현재 사용자 ID */
+  userId: string;
   /** 새로운 타임스탬프가 추가되었을 때 리프레시 트리거 */
   refreshTrigger?: number;
 }
 
 export const TimestampList: React.FC<TimestampListProps> = ({
   timerId,
+  userId,
   refreshTrigger = 0
 }) => {
   const [timestamps, setTimestamps] = useState<TimestampEntry[]>([]);
@@ -41,16 +44,24 @@ export const TimestampList: React.FC<TimestampListProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   /**
-   * 타임스탬프 목록 로드
+   * 타임스탬프 목록 로드 (사용자별)
    */
   const loadTimestamps = async () => {
-    if (!timerId) return;
+    if (!timerId || !userId) return;
     
     setLoading(true);
     setError(null);
     
     try {
-      const timestampList = await TimerApiService.getTimerHistory(timerId);
+      // 먼저 사용자별 API 시도, 실패하면 전체 목록에서 필터링
+      let timestampList;
+      try {
+        timestampList = await TimerApiService.getUserTimerHistory(timerId, userId);
+      } catch (userApiError) {
+        console.warn('사용자별 API 실패, 전체 목록에서 필터링:', userApiError);
+        const allTimestamps = await TimerApiService.getTimerHistory(timerId);
+        timestampList = allTimestamps.filter(ts => ts.userId === userId);
+      }
       setTimestamps(timestampList);
     } catch (err) {
       console.error('타임스탬프 목록 로드 실패:', err);
@@ -65,7 +76,7 @@ export const TimestampList: React.FC<TimestampListProps> = ({
    */
   useEffect(() => {
     loadTimestamps();
-  }, [timerId, refreshTrigger]);
+  }, [timerId, userId, refreshTrigger]);
 
   /**
    * 시간을 MM:SS 형식으로 포맷팅

@@ -182,9 +182,9 @@ export const TimerDisplay: React.FC<TimerDisplayProps> = ({
             </IconButton>
           </Tooltip>
 
-          {/* 완료 (Owner만) */}
+          {/* 정지 (Owner만) */}
           {userRole === 'OWNER' && (
-            <Tooltip title="타이머 완료">
+            <Tooltip title="타이머 정지">
               <IconButton
                 onClick={onComplete}
                 disabled={isCompleted}
