@@ -1,5 +1,6 @@
 package com.kb.timer.model.event;
 
+import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
@@ -25,6 +26,7 @@ public class TimerCompletedEvent extends TimerEvent {
     /**
      * 완료 감지 시각
      */
+    @Builder.Default
     private Instant completedAt = Instant.now();
     
     /**

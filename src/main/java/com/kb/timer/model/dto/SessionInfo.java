@@ -40,10 +40,12 @@ public class SessionInfo {
     /**
      * 연결 시각
      */
+    @Builder.Default
     private Instant connectedAt = Instant.now();
     
     /**
      * 마지막 하트비트 시각
      */
+    @Builder.Default
     private Instant lastHeartbeat = Instant.now();
 }

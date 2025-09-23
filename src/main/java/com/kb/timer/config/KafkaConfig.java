@@ -10,6 +10,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.annotation.EnableKafka;
+import org.springframework.kafka.core.reactive.ReactiveKafkaConsumerTemplate;
+import org.springframework.kafka.core.reactive.ReactiveKafkaProducerTemplate;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
 import reactor.kafka.receiver.ReceiverOptions;
@@ -87,6 +89,88 @@ public class KafkaConfig {
         props.put(ConsumerConfig.CLIENT_ID_CONFIG, "timer-consumer-" + getServerInstanceId());
         
         return ReceiverOptions.create(props);
+    }
+    
+    /**
+     * Timer Events 토픽용 Consumer 설정
+     */
+    @Bean
+    public ReceiverOptions<String, TimerEvent> timerEventsConsumerOptions() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "timer-service");
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+        
+        // JSON 역직렬화 설정
+        props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.kb.timer.model.event");
+        props.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, true);
+        props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, TimerEvent.class.getName());
+        
+        // 성능 최적화 설정
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        props.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, 1000);
+        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 500);
+        props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, 1);
+        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 500);
+        
+        // 고유한 클라이언트 ID 설정 (JMX 충돌 방지)
+        props.put(ConsumerConfig.CLIENT_ID_CONFIG, "timer-events-consumer-" + getServerInstanceId());
+        
+        return ReceiverOptions.<String, TimerEvent>create(props)
+                .subscription(java.util.Collections.singleton("timer-events"));
+    }
+    
+    /**
+     * User Actions 토픽용 Consumer 설정
+     */
+    @Bean
+    public ReceiverOptions<String, TimerEvent> userActionsConsumerOptions() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "timer-service");
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+        
+        // JSON 역직렬화 설정
+        props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.kb.timer.model.event");
+        props.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, true);
+        props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, TimerEvent.class.getName());
+        
+        // 성능 최적화 설정
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        props.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, 1000);
+        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 500);
+        props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, 1);
+        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 500);
+        
+        // 고유한 클라이언트 ID 설정 (JMX 충돌 방지)
+        props.put(ConsumerConfig.CLIENT_ID_CONFIG, "user-actions-consumer-" + getServerInstanceId());
+        
+        return ReceiverOptions.<String, TimerEvent>create(props)
+                .subscription(java.util.Collections.singleton("user-actions"));
+    }
+    
+    /**
+     * Reactive Kafka Producer Template
+     */
+    @Bean
+    public ReactiveKafkaProducerTemplate<String, TimerEvent> reactiveKafkaProducerTemplate() {
+        SenderOptions<String, Object> senderOptions = kafkaProducerOptions();
+        // TimerEvent 전용으로 타입 캐스팅
+        @SuppressWarnings("unchecked")
+        SenderOptions<String, TimerEvent> typedOptions = (SenderOptions<String, TimerEvent>) (Object) senderOptions;
+        return new ReactiveKafkaProducerTemplate<>(typedOptions);
+    }
+    
+    /**
+     * Reactive Kafka Consumer Template
+     */
+    @Bean
+    public ReactiveKafkaConsumerTemplate<String, TimerEvent> reactiveKafkaConsumerTemplate() {
+        return new ReactiveKafkaConsumerTemplate<>(kafkaConsumerOptions());
     }
     
     /**

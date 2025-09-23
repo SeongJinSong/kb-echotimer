@@ -10,8 +10,11 @@ import org.springframework.kafka.core.reactive.ReactiveKafkaConsumerTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
+import reactor.kafka.receiver.KafkaReceiver;
+import reactor.kafka.receiver.ReceiverOptions;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import java.time.Instant;
 
 /**
@@ -23,7 +26,8 @@ import java.time.Instant;
 @RequiredArgsConstructor
 public class KafkaEventConsumer {
     
-    private final ReactiveKafkaConsumerTemplate<String, TimerEvent> kafkaConsumerTemplate;
+    private final ReceiverOptions<String, TimerEvent> timerEventsConsumerOptions;
+    private final ReceiverOptions<String, TimerEvent> userActionsConsumerOptions;
     private final RedisConnectionManager connectionManager;
     private final TimerEventLogRepository eventLogRepository;
     private final SimpMessagingTemplate messagingTemplate;
@@ -31,23 +35,60 @@ public class KafkaEventConsumer {
     @Value("${server.instance.id}")
     private String serverId;
     
+    private reactor.core.Disposable timerEventsDisposable;
+    private reactor.core.Disposable userActionsDisposable;
+    
     /**
      * Kafka 이벤트 소비 시작
      */
     @PostConstruct
     public void startConsuming() {
-        kafkaConsumerTemplate
-            .receiveAutoAck()
+        // Timer Events 토픽 구독
+        timerEventsDisposable = KafkaReceiver.create(timerEventsConsumerOptions)
+            .receive()
             .doOnNext(record -> {
-                log.debug("Kafka 이벤트 수신: {} - {}", 
-                    record.value().getEventType(), record.value().getTimerId());
+                log.debug("Timer Event 수신: key={}, type={}, timerId={}", 
+                    record.key(), record.value().getEventType(), record.value().getTimerId());
             })
-            .flatMap(record -> processEvent(record.value()))
-            .doOnError(error -> log.error("Kafka 이벤트 처리 중 오류 발생", error))
-            .retry() // 오류 발생 시 재시도
+            .flatMap(record -> processEvent(record.value())
+                .doOnSuccess(v -> record.receiverOffset().acknowledge())
+                .doOnError(e -> log.error("Timer Event 처리 실패: {}", e.getMessage(), e))
+                .onErrorComplete()) // 오류 발생 시에도 계속 진행
+            .doOnError(error -> log.error("Timer Event Consumer 오류", error))
+            .onErrorContinue((error, obj) -> log.error("Timer Event Consumer 복구 시도: {}", obj, error))
             .subscribe();
         
-        log.info("Kafka 이벤트 소비 시작됨 - 서버 ID: {}", serverId);
+        // User Actions 토픽 구독
+        userActionsDisposable = KafkaReceiver.create(userActionsConsumerOptions)
+            .receive()
+            .doOnNext(record -> {
+                log.debug("User Action Event 수신: key={}, type={}, timerId={}", 
+                    record.key(), record.value().getEventType(), record.value().getTimerId());
+            })
+            .flatMap(record -> processEvent(record.value())
+                .doOnSuccess(v -> record.receiverOffset().acknowledge())
+                .doOnError(e -> log.error("User Action Event 처리 실패: {}", e.getMessage(), e))
+                .onErrorComplete()) // 오류 발생 시에도 계속 진행
+            .doOnError(error -> log.error("User Action Event Consumer 오류", error))
+            .onErrorContinue((error, obj) -> log.error("User Action Event Consumer 복구 시도: {}", obj, error))
+            .subscribe();
+        
+        log.info("Kafka Consumer 시작: serverId={}", serverId);
+    }
+    
+    /**
+     * 애플리케이션 종료 시 Consumer 정리
+     */
+    @PreDestroy
+    public void cleanup() {
+        if (timerEventsDisposable != null && !timerEventsDisposable.isDisposed()) {
+            timerEventsDisposable.dispose();
+            log.info("Timer Events Consumer 종료됨");
+        }
+        if (userActionsDisposable != null && !userActionsDisposable.isDisposed()) {
+            userActionsDisposable.dispose();
+            log.info("User Actions Consumer 종료됨");
+        }
     }
     
     /**
@@ -56,7 +97,7 @@ public class KafkaEventConsumer {
      * @return 처리 결과
      */
     private Mono<Void> processEvent(TimerEvent event) {
-        return connectionManager.isServerRelevantForTimer(event.getTimerId())
+        return connectionManager.isServerRelevantForTimer(event.getTimerId(), serverId)
             .flatMap(isRelevant -> {
                 if (!isRelevant) {
                     // 현재 서버와 관련없는 이벤트는 무시
@@ -93,7 +134,7 @@ public class KafkaEventConsumer {
             .eventType(event.getEventType())
             .timestamp(event.getTimestamp())
             .userId(extractUserId(event))
-            .eventData(event)
+            .eventData(null) // 이벤트 데이터는 별도 처리
             .createdAt(Instant.now())
             .build();
         

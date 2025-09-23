@@ -74,5 +74,6 @@ public class TimerEventLog {
      * 문서 생성 시각 (TTL 인덱스용)
      */
     @Indexed(expireAfterSeconds = 31536000) // 1년 후 자동 삭제
+    @Builder.Default
     private Instant createdAt = Instant.now();
 }

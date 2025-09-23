@@ -44,11 +44,11 @@ public class TimerService {
         
         TimerResponse response = TimerResponse.builder()
             .timerId(timerId)
-            .targetTime(targetTime)
+            .targetTime(now.plusSeconds(targetTime))
             .serverTime(now)
-            .remainingTime(targetTime)
+            .remainingTime(java.time.Duration.ofSeconds(targetTime))
             .ownerId(ownerId)
-            .shareUrl(generateShareUrl(timerId))
+            .shareToken(generateShareUrl(timerId))
             .build();
         
         return Mono.just(response);
@@ -68,10 +68,10 @@ public class TimerService {
         
         return Mono.just(TimerResponse.builder()
             .timerId(timerId)
-            .targetTime(3600L) // 기본 1시간
+            .targetTime(now.plusSeconds(3600L)) // 기본 1시간
             .serverTime(now)
-            .remainingTime(3600L)
-            .shareUrl(generateShareUrl(timerId))
+            .remainingTime(java.time.Duration.ofSeconds(3600L))
+            .shareToken(generateShareUrl(timerId))
             .build());
     }
     
@@ -84,7 +84,7 @@ public class TimerService {
     public Mono<Void> joinTimer(String timerId, String userId) {
         log.info("사용자 타이머 참여: {} -> {}", userId, timerId);
         
-        return connectionManager.recordUserConnection(timerId, userId, serverId)
+        return connectionManager.recordUserConnection(timerId, userId, "session-" + userId, serverId)
             .then(publishUserJoinedEvent(timerId, userId))
             .doOnSuccess(result -> 
                 log.info("사용자 타이머 참여 완료: {} -> {}", userId, timerId)
@@ -100,7 +100,7 @@ public class TimerService {
     public Mono<Void> leaveTimer(String timerId, String userId) {
         log.info("사용자 타이머 떠나기: {} -> {}", userId, timerId);
         
-        return connectionManager.removeUserConnection(timerId, userId)
+        return connectionManager.removeUserConnection("session-" + userId)
             .then(publishUserLeftEvent(timerId, userId))
             .doOnSuccess(result -> 
                 log.info("사용자 타이머 떠나기 완료: {} -> {}", userId, timerId)
@@ -125,9 +125,9 @@ public class TimerService {
             .timerId(timerId)
             .userId(userId)
             .savedAt(now)
-            .remainingTime(remainingTime)
-            .targetTime(targetTime)
-            .metadata("저장됨")
+            .remainingTime(java.time.Duration.ofSeconds(remainingTime))
+            .targetTime(now.plusSeconds(targetTime))
+            .metadata(java.util.Map.of("status", "저장됨"))
             .createdAt(now)
             .build();
         
@@ -192,7 +192,6 @@ public class TimerService {
             .eventId(UUID.randomUUID().toString())
             .timestamp(Instant.now())
             .originServerId(serverId)
-            .priority(EventPriority.NORMAL)
             .build();
         
         return eventPublisher.publishEvent(event);
@@ -205,7 +204,6 @@ public class TimerService {
             .eventId(UUID.randomUUID().toString())
             .timestamp(Instant.now())
             .originServerId(serverId)
-            .priority(EventPriority.NORMAL)
             .build();
         
         return eventPublisher.publishEvent(event);
@@ -215,14 +213,10 @@ public class TimerService {
         TimestampSavedEvent event = TimestampSavedEvent.builder()
             .timerId(entry.getTimerId())
             .userId(entry.getUserId())
-            .savedAt(entry.getSavedAt())
-            .remainingTime(entry.getRemainingTime())
-            .targetTime(entry.getTargetTime())
-            .metadata(entry.getMetadata())
+            .timestampEntry(entry)
             .eventId(UUID.randomUUID().toString())
             .timestamp(Instant.now())
             .originServerId(serverId)
-            .priority(EventPriority.NORMAL)
             .build();
         
         return eventPublisher.publishEvent(event);
@@ -230,15 +224,15 @@ public class TimerService {
     
     private Mono<Void> publishTargetTimeChangedEvent(String timerId, long oldTargetTime, 
                                                    long newTargetTime, String changedBy) {
+        Instant now = Instant.now();
         TargetTimeChangedEvent event = TargetTimeChangedEvent.builder()
             .timerId(timerId)
-            .oldTargetTime(oldTargetTime)
-            .newTargetTime(newTargetTime)
+            .oldTargetTime(now.plusSeconds(oldTargetTime))
+            .newTargetTime(now.plusSeconds(newTargetTime))
             .changedBy(changedBy)
             .eventId(UUID.randomUUID().toString())
-            .timestamp(Instant.now())
+            .timestamp(now)
             .originServerId(serverId)
-            .priority(EventPriority.IMPORTANT)
             .build();
         
         return eventPublisher.publishEvent(event);
@@ -247,11 +241,10 @@ public class TimerService {
     private Mono<Void> publishTimerCompletedEvent(String timerId) {
         TimerCompletedEvent event = TimerCompletedEvent.builder()
             .timerId(timerId)
-            .completionTime(Instant.now())
+            .completedAt(Instant.now())
             .eventId(UUID.randomUUID().toString())
             .timestamp(Instant.now())
             .originServerId(serverId)
-            .priority(EventPriority.CRITICAL)
             .build();
         
         return eventPublisher.publishEvent(event);

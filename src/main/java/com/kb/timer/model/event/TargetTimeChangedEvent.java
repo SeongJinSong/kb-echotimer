@@ -1,5 +1,6 @@
 package com.kb.timer.model.event;
 
+import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
@@ -35,6 +36,7 @@ public class TargetTimeChangedEvent extends TimerEvent {
     /**
      * 서버 시각 (클라이언트 동기화용)
      */
+    @Builder.Default
     private Instant serverTime = Instant.now();
     
     @Override

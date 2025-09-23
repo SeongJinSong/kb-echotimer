@@ -64,5 +64,6 @@ public class TimestampEntry {
      * 문서 생성 시각 (TTL 인덱스용)
      */
     @Indexed(expireAfterSeconds = 7776000) // 90일 후 자동 삭제
+    @Builder.Default
     private Instant createdAt = Instant.now();
 }

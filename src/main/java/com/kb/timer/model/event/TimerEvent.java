@@ -2,6 +2,7 @@ package com.kb.timer.model.event;
 
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
@@ -29,6 +30,7 @@ public abstract class TimerEvent {
     /**
      * 이벤트 고유 ID
      */
+    @Builder.Default
     private String eventId = UUID.randomUUID().toString();
     
     /**
@@ -39,6 +41,7 @@ public abstract class TimerEvent {
     /**
      * 이벤트 발생 시각
      */
+    @Builder.Default
     private Instant timestamp = Instant.now();
     
     /**
