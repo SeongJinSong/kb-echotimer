@@ -6,6 +6,7 @@ import lombok.Data;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 타이머 응답 DTO
@@ -19,6 +20,11 @@ public class TimerResponse {
      * 타이머 ID
      */
     private String timerId;
+    
+    /**
+     * 사용자 ID
+     */
+    private String userId;
     
     /**
      * 목표 시간 (UTC)
@@ -64,4 +70,14 @@ public class TimerResponse {
      * 사용자 권한 (OWNER, VIEWER)
      */
     private String userRole;
+    
+    /**
+     * 저장된 시각
+     */
+    private Instant savedAt;
+    
+    /**
+     * 추가 메타데이터
+     */
+    private Map<String, Object> metadata;
 }

@@ -1,10 +1,14 @@
 package com.kb.timer.model.event;
 
-import com.kb.timer.model.entity.TimestampEntry;
+import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Map;
 
 /**
  * 타임스탬프 저장 이벤트
@@ -22,9 +26,25 @@ public class TimestampSavedEvent extends TimerEvent {
     private String userId;
     
     /**
-     * 저장된 타임스탬프 정보
+     * 저장된 시각
      */
-    private TimestampEntry timestampEntry;
+    @Builder.Default
+    private Instant savedAt = Instant.now();
+    
+    /**
+     * 남은 시간
+     */
+    private Duration remainingTime;
+    
+    /**
+     * 목표 시간
+     */
+    private Instant targetTime;
+    
+    /**
+     * 추가 메타데이터
+     */
+    private Map<String, Object> metadata;
     
     @Override
     public String getEventType() {
