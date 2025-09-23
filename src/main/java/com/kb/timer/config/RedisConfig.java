@@ -5,7 +5,9 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
+import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
@@ -60,5 +62,27 @@ public class RedisConfig {
             .build();
         
         return new ReactiveRedisTemplate<>(connectionFactory, context);
+    }
+    
+    /**
+     * Redis 메시지 리스너 컨테이너 (Keyspace Notifications용)
+     * Redis 키 만료 이벤트를 수신하기 위해 필요
+     */
+    @Bean
+    public RedisMessageListenerContainer redisMessageListenerContainer(RedisConnectionFactory connectionFactory) {
+        RedisMessageListenerContainer container = new RedisMessageListenerContainer();
+        container.setConnectionFactory(connectionFactory);
+        
+        // Redis Keyspace Notifications 활성화 설정
+        // notify-keyspace-events Ex (키 만료 이벤트 활성화)
+        try {
+            connectionFactory.getConnection().serverCommands().setConfig("notify-keyspace-events", "Ex");
+        } catch (Exception e) {
+            // Redis 설정 변경 권한이 없는 경우 로그만 출력
+            System.out.println("Redis notify-keyspace-events 설정 실패 (권한 없음): " + e.getMessage());
+            System.out.println("Redis 서버에서 수동으로 설정하세요: CONFIG SET notify-keyspace-events Ex");
+        }
+        
+        return container;
     }
 }

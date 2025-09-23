@@ -33,6 +33,7 @@ public class TimerService {
     private final KafkaEventPublisher kafkaEventPublisher;
     private final RedisConnectionManager connectionManager;
     private final SimpMessagingTemplate messagingTemplate;
+    private final RedisTTLSchedulerService redisTTLSchedulerService;
     
     @Value("${server.instance.id}")
     private String serverId;
@@ -62,6 +63,11 @@ public class TimerService {
                 .build();
 
         return timerRepository.save(timer)
+                .doOnNext(savedTimer -> {
+                    // 타이머 완료 스케줄 등록
+                    redisTTLSchedulerService.scheduleTimer(savedTimer);
+                    log.info("타이머 생성 및 스케줄 등록 완료: timerId={}", savedTimer.getId());
+                })
                 .map(savedTimer -> {
                     // 남은 시간 계산 (음수가 되지 않도록 처리)
                     Duration remainingTime = Duration.between(now, savedTimer.getTargetTime());
@@ -150,6 +156,11 @@ public class TimerService {
                     timer.setUpdatedAt(now);
                     
                     return timerRepository.save(timer)
+                            .doOnNext(updatedTimer -> {
+                    // 타이머 스케줄 업데이트
+                    redisTTLSchedulerService.updateTimerSchedule(updatedTimer);
+                                log.info("타이머 목표 시간 변경 및 스케줄 업데이트 완료: timerId={}", updatedTimer.getId());
+                            })
                             .flatMap(updatedTimer -> {
                                 // 이벤트 발행
                                 TargetTimeChangedEvent event = TargetTimeChangedEvent.builder()
@@ -240,6 +251,22 @@ public class TimerService {
                 .doOnNext(entry -> log.debug("타임스탬프 조회: {} - 사용자: {}, 시간: {}", 
                         entry.getTimerId(), entry.getUserId(), entry.getTargetTime()))
                 .doOnError(e -> log.error("타임스탬프 목록 조회 실패: timerId={}. Error: {}", timerId, e.getMessage(), e));
+    }
+
+    /**
+     * 특정 사용자의 타임스탬프 히스토리를 조회합니다.
+     * 
+     * @param timerId 타이머 ID
+     * @param userId 사용자 ID
+     * @return 사용자별 타임스탬프 엔트리 목록
+     */
+    public Flux<TimestampEntry> getUserTimerHistory(String timerId, String userId) {
+        log.debug("사용자별 타임스탬프 목록 조회: timerId={}, userId={}", timerId, userId);
+        return timestampRepository.findByTimerIdAndUserIdOrderByCreatedAtAsc(timerId, userId)
+                .doOnNext(entry -> log.debug("사용자 타임스탬프 조회: {} - 사용자: {}, 시간: {}", 
+                        entry.getTimerId(), entry.getUserId(), entry.getTargetTime()))
+                .doOnError(e -> log.error("사용자별 타임스탬프 목록 조회 실패: timerId={}, userId={}. Error: {}", 
+                        timerId, userId, e.getMessage(), e));
     }
 
     /**
@@ -397,11 +424,24 @@ public class TimerService {
         return timerRepository.findById(timerId)
                 .switchIfEmpty(Mono.error(new RuntimeException("타이머를 찾을 수 없습니다: " + timerId)))
                 .flatMap(timer -> {
+                    // 이미 완료된 타이머인 경우 중복 처리 방지
+                    if (timer.isCompleted()) {
+                        log.info("타이머가 이미 완료됨: timerId={}", timerId);
+                        return Mono.empty();
+                    }
+                    
                     // 타이머를 완료 상태로 업데이트
+                    Instant now = Instant.now();
                     timer.setCompleted(true);
-                    timer.setUpdatedAt(Instant.now());
+                    timer.setCompletedAt(now);
+                    timer.setUpdatedAt(now);
                     
                     return timerRepository.save(timer)
+                            .doOnNext(savedTimer -> {
+                    // 타이머 완료 시 스케줄 취소
+                    redisTTLSchedulerService.cancelTimerSchedule(savedTimer.getId());
+                                log.info("타이머 완료 및 스케줄 취소: timerId={}", savedTimer.getId());
+                            })
                             .flatMap(savedTimer -> {
                                 // 온라인 사용자 수 조회
                                 return connectionManager.getOnlineUserCount(timerId)

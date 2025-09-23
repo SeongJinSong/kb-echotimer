@@ -31,7 +31,23 @@ public interface TimerRepository extends ReactiveMongoRepository<Timer, String> 
     
     /**
      * 완료되지 않은 타이머 목록 조회 (정리용)
+     * @param targetTime 기준 시간
      * @return 미완료 타이머 목록
      */
     Flux<Timer> findByCompletedFalseAndTargetTimeBefore(Instant targetTime);
+    
+    /**
+     * 완료된 타이머 목록 조회 (정리용)
+     * @param completedAt 완료 시간 기준
+     * @return 완료된 타이머 목록
+     */
+    Flux<Timer> findByCompletedTrueAndCompletedAtBefore(Instant completedAt);
+    
+    /**
+     * 특정 시간 범위의 미완료 타이머 조회 (복구용)
+     * @param startTime 시작 시간
+     * @param endTime 종료 시간
+     * @return 미완료 타이머 목록
+     */
+    Flux<Timer> findByCompletedFalseAndTargetTimeAfterAndTargetTimeBefore(Instant startTime, Instant endTime);
 }
