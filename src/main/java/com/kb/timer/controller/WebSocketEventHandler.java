@@ -13,6 +13,9 @@ import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 import org.springframework.web.socket.messaging.SessionSubscribeEvent;
 import org.springframework.web.socket.messaging.SessionUnsubscribeEvent;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
 /**
  * WebSocket 이벤트 핸들러
  * 연결, 해제, 구독, 구독 해제 이벤트 처리
@@ -25,6 +28,22 @@ public class WebSocketEventHandler {
     private final RedisConnectionManager redisConnectionManager;
     private final TimerService timerService;
     private final ServerInstanceIdGenerator serverInstanceIdGenerator;
+    
+    // 세션 ID -> {timerId, userId} 매핑 추적
+    private final ConcurrentMap<String, SessionInfo> sessionTracker = new ConcurrentHashMap<>();
+    
+    /**
+     * 세션 정보 저장용 내부 클래스
+     */
+    private static class SessionInfo {
+        final String timerId;
+        final String userId;
+        
+        SessionInfo(String timerId, String userId) {
+            this.timerId = timerId;
+            this.userId = userId;
+        }
+    }
 
     /**
      * WebSocket 연결 이벤트 처리
@@ -53,12 +72,31 @@ public class WebSocketEventHandler {
         
         log.info("WebSocket 연결 해제됨: sessionId={}", sessionId);
         
-        // Redis에서 연결 정보 제거
-        redisConnectionManager.removeUserConnection(sessionId)
-                .doOnSuccess(result -> log.info("연결 해제 처리 완료: sessionId={}", sessionId))
-                .doOnError(error -> log.error("연결 해제 처리 실패: sessionId={}, error={}", 
-                          sessionId, error.getMessage(), error))
-                .subscribe(); // 비동기 처리
+        // 세션 추적 정보에서 타이머 정보 조회
+        SessionInfo sessionInfo = sessionTracker.remove(sessionId);
+        
+        if (sessionInfo != null) {
+            log.info("세션 정보 발견: sessionId={}, timerId={}, userId={}", 
+                    sessionId, sessionInfo.timerId, sessionInfo.userId);
+            
+            // Redis에서 사용자 연결 정보 제거
+            redisConnectionManager.removeUserConnection(sessionInfo.timerId, sessionInfo.userId)
+                    .then(timerService.publishUserLeftEvent(sessionInfo.timerId, sessionInfo.userId))
+                    .doOnSuccess(ignored -> log.info("연결 해제 처리 완료: sessionId={}, timerId={}, userId={}", 
+                            sessionId, sessionInfo.timerId, sessionInfo.userId))
+                    .doOnError(error -> log.error("연결 해제 처리 실패: sessionId={}, timerId={}, userId={}, error={}", 
+                            sessionId, sessionInfo.timerId, sessionInfo.userId, error.getMessage(), error))
+                    .subscribe();
+        } else {
+            log.warn("세션 추적 정보 없음: sessionId={}", sessionId);
+            
+            // 세션 정보가 없는 경우 일반적인 정리 작업만 수행
+            redisConnectionManager.cleanupExpiredConnections()
+                    .doOnSuccess(ignored -> log.info("일반 연결 해제 처리 완료: sessionId={}", sessionId))
+                    .doOnError(error -> log.error("일반 연결 해제 처리 실패: sessionId={}, error={}", 
+                            sessionId, error.getMessage(), error))
+                    .subscribe();
+        }
     }
 
     /**
@@ -85,6 +123,10 @@ public class WebSocketEventHandler {
                 String serverId = serverInstanceIdGenerator.getServerInstanceId();
                 
                 log.info("타이머 구독 요청: timerId={}, userId={}, sessionId={}", timerId, userId, sessionId);
+                
+                // 세션 추적 정보 저장
+                sessionTracker.put(sessionId, new SessionInfo(timerId, userId));
+                log.debug("세션 추적 정보 저장: sessionId={}, timerId={}, userId={}", sessionId, timerId, userId);
                 
                 redisConnectionManager.recordUserConnection(timerId, userId, serverId, sessionId)
                     .then(timerService.publishUserJoinedEvent(timerId, userId))

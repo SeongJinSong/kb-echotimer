@@ -149,6 +149,24 @@ public class TimerRestController {
     }
 
     /**
+     * 특정 사용자의 타임스탬프 히스토리를 조회합니다.
+     * 
+     * @param timerId 타이머 ID
+     * @param userId 사용자 ID
+     * @return 사용자별 타임스탬프 목록
+     */
+    @GetMapping("/{timerId}/history/{userId}")
+    public Flux<TimestampEntry> getUserTimerHistory(@PathVariable String timerId, @PathVariable String userId) {
+        log.info("REST API - 사용자별 타이머 히스토리 조회: timerId={}, userId={}", timerId, userId);
+        
+        return timerService.getUserTimerHistory(timerId, userId)
+                .doOnNext(entry -> log.debug("REST API - 사용자 타임스탬프 엔트리: {}", entry.getId()))
+                .doOnComplete(() -> log.info("REST API - 사용자별 타이머 히스토리 조회 완료: timerId={}, userId={}", timerId, userId))
+                .doOnError(error -> log.error("REST API - 사용자별 타이머 히스토리 조회 실패: timerId={}, userId={}, error={}", 
+                        timerId, userId, error.getMessage(), error));
+    }
+
+    /**
      * 타이머 완료를 알립니다.
      * 
      * @param timerId 타이머 ID

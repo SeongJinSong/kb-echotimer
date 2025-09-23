@@ -166,4 +166,39 @@ public class RedisConnectionManager {
             })
             .then();
     }
+
+    /**
+     * 사용자 연결 해제 처리 (타이머 ID, 사용자 ID 기반)
+     * 특정 타이머에서 특정 사용자를 강제로 제거할 때 사용
+     */
+    public Mono<Void> removeUserConnection(String timerId, String userId) {
+        log.info("사용자 연결 강제 해제: timerId={}, userId={}", timerId, userId);
+        
+        return Mono.when(
+            // 1. 타이머별 온라인 사용자에서 제거
+            stringRedisTemplate.opsForSet().remove("timer:" + timerId + ":online_users", userId)
+                .doOnNext(removed -> log.info("Redis SET에서 제거: timer:{}:online_users, userId={}, removed={}", 
+                        timerId, userId, removed)),
+            
+            // 2. 사용자별 연결 서버 정보 삭제
+            stringRedisTemplate.delete("user:" + userId + ":server")
+                .doOnNext(deleted -> log.debug("사용자 서버 정보 삭제: user:{}:server, deleted={}", userId, deleted))
+        )
+        .doOnSuccess(ignored -> log.info("사용자 연결 강제 해제 완료: timerId={}, userId={}", timerId, userId))
+        .doOnError(error -> log.error("사용자 연결 강제 해제 실패: timerId={}, userId={}, error={}", 
+                timerId, userId, error.getMessage(), error));
+    }
+
+    /**
+     * 만료된 연결 정리
+     * 주기적으로 호출하여 오래된 세션 정보를 정리
+     */
+    public Mono<Void> cleanupExpiredConnections() {
+        log.debug("만료된 연결 정리 시작");
+        
+        // 현재는 단순히 성공 반환 (실제로는 TTL 기반으로 자동 정리됨)
+        return Mono.<Void>empty()
+                .doOnSuccess(ignored -> log.debug("만료된 연결 정리 완료"))
+                .doOnError(error -> log.error("만료된 연결 정리 실패: {}", error.getMessage(), error));
+    }
 }
