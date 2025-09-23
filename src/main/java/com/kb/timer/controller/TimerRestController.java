@@ -66,6 +66,27 @@ public class TimerRestController {
     }
 
     /**
+     * 공유 토큰으로 타이머 정보를 조회합니다.
+     *
+     * @param shareToken 공유 토큰
+     * @param userId     요청 사용자 ID
+     * @return 타이머 정보
+     */
+    @GetMapping("/shared/{shareToken}")
+    public Mono<ResponseEntity<TimerResponse>> getTimerByShareToken(
+            @PathVariable String shareToken,
+            @RequestParam(required = false, defaultValue = "anonymous") String userId) {
+
+        log.info("REST API - 공유 타이머 정보 조회 요청: shareToken={}, userId={}", shareToken, userId);
+
+        return timerService.getTimerInfoByShareToken(shareToken, userId)
+                .map(ResponseEntity::ok)
+                .doOnSuccess(response -> log.info("REST API - 공유 타이머 정보 조회 완료: {}", shareToken))
+                .doOnError(error -> log.error("REST API - 공유 타이머 정보 조회 실패: shareToken={}, error={}",
+                        shareToken, error.getMessage(), error));
+    }
+
+    /**
      * 타이머의 목표 시간을 변경합니다.
      * 
      * @param timerId 타이머 ID
