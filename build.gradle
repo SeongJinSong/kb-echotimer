@@ -104,7 +104,10 @@ task cleanFrontend(type: Delete) {
 }
 
 // Spring Boot 빌드 시 프론트엔드도 함께 빌드
-processResources.dependsOn copyFrontendResources
+// 단, 이미 빌드된 파일이 있으면 건너뛰기 (개발 편의성)
+if (!file('src/main/resources/static/index.html').exists()) {
+    processResources.dependsOn copyFrontendResources
+}
 clean.dependsOn cleanFrontend
 
 // 개발용 태스크: 프론트엔드 개발 서버 실행

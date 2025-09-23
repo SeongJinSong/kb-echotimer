@@ -24,7 +24,7 @@ WebSocket을 통한 실시간 동기화와 Kafka를 이용한 이벤트 스트�
 - **Spring WebSocket** - 실시간 통신 (STOMP)
 - **Apache Kafka** - 이벤트 스트리밍
 - **MongoDB** - 데이터 저장소
-- **Redis** - 세션 관리 및 캐싱
+- **Redis** - 세션 관리, 캐싱, 분산 락, TTL 스케줄링
 - **Lombok** - 코드 간소화
 
 ### 프론트엔드
@@ -34,6 +34,79 @@ WebSocket을 통한 실시간 동기화와 Kafka를 이용한 이벤트 스트�
 - **Material-UI (MUI)** - UI 컴포넌트 라이브러리
 - **STOMP.js** - WebSocket 클라이언트
 - **Axios** - HTTP 클라이언트
+
+## 🎯 핵심 아키텍처 설계
+
+### 1. 분산 타이머 스케줄링 시스템
+```
+Redis TTL + Keyspace Notifications 기반 정확한 타이머 완료 처리
+키만료 → Keyspace Notification → 분산락 → Kafka → WebSocket → 클라이언트
+```
+
+**핵심 특징:**
+- ⚡ **정확한 타이밍**: Redis TTL로 밀리초 단위 정확성
+- 🔒 **분산 락**: 여러 서버 환경에서 중복 처리 방지
+- 🔄 **실시간 이벤트**: Keyspace Notifications로 즉시 반응
+- 📊 **완벽한 추적**: 모든 처리 과정 MongoDB 기록
+
+### 2. 지능형 모니터링 시스템
+```
+MongoDB JOIN 기반 누락 타이머 자동 감지 및 분석
+Timer 컬렉션 ⟷ TimerCompletionLog 컬렉션 비교 분석
+```
+
+**감지 가능한 문제:**
+- 🚨 **Keyspace Notification 미수신** (Redis 연결 문제)
+- 🔐 **분산 락 획득 실패** (서버 간 경쟁 상황)
+- ❌ **처리 로직 실패** (MongoDB/Kafka 연결 오류)
+- 🔄 **데이터 불일치** (로그 성공 but 엔티티 미업데이트)
+
+### 3. 효율적인 분산 필터링
+```
+Redis SET 교집합 연산으로 관련 서버만 WebSocket 브로드캐스트
+SINTER timer:{id}:online_users server:{id}:users
+```
+
+**장점:**
+- 🎯 **정확한 타겟팅**: 실제 연결된 사용자가 있는 서버만 처리
+- ⚡ **성능 최적화**: 불필요한 네트워크 트래픽 제거
+- 📈 **확장성**: 서버 수에 관계없이 O(1) 복잡도
+
+### 4. 견고한 분산 시스템 설계
+```
+다중 안전장치로 100% 신뢰성 보장
+1차: Redis 분산 락 → 2차: MongoDB 상태 확인 → 3차: 모니터링 시스템
+```
+
+**안전장치:**
+- 🛡️ **분산 락 TTL**: 데드락 방지 (5분 자동 해제)
+- 🔍 **실시간 감지**: 1분마다 누락 타이머 자동 감지
+- 📋 **상세 분석**: 실패 원인별 분류 및 로그
+- 🔄 **자동 복구**: 락 만료 시 다른 서버가 자동 처리
+
+### 5. WebSocket vs SSE 기술 선택
+```
+실시간 양방향 통신을 위한 WebSocket (STOMP) 채택
+클라이언트 ↔ 서버 즉시 상호작용 + 효율적 브로드캐스트
+```
+
+**WebSocket 선택 이유:**
+- 🔄 **양방향 실시간 통신**: 타임스탬프 저장, 타이머 완료 등 즉시 서버 전송
+- 🌐 **단일 연결**: REST API + SSE 이중 채널 대신 통합 연결
+- 🔌 **자동 재연결**: 서버 재시작/네트워크 문제 시 자동 복구
+- 📡 **STOMP 표준화**: 구독/발행 패턴으로 메시지 라우팅
+- ⚡ **효율적 필터링**: 기존 Redis SET 교집합 로직 재사용
+
+**SSE 대비 장점:**
+```
+SSE 방식: 클라이언트 액션 → REST API → Kafka → 관련 서버 → 필터링 → SSE
+WebSocket: 클라이언트 액션 → WebSocket → Kafka → 관련 서버 → 필터링 → WebSocket
+```
+- 🔄 **양방향 통신**: SSE는 서버→클라이언트만 가능, 클라이언트→서버는 별도 REST API 필요
+- 📊 **구현 복잡도**: SSE는 실시간 액션을 위해 REST + SSE 이중 구조 필요
+- 🔗 **연결 관리**: WebSocket 단일 연결 vs SSE+REST 이중 연결 상태 관리
+- 📡 **프로토콜 표준화**: STOMP로 구독/발행/라우팅 표준화 vs SSE 커스텀 구현
+- ⚡ **즉시성**: WebSocket은 클라이언트 액션 즉시 전송, SSE는 HTTP 요청 오버헤드
 
 ## 📦 프로젝트 구조
 
@@ -136,13 +209,26 @@ java -jar build/libs/kb-echotimer-1.0.0.jar
 
 ### REST API 엔드포인트
 
+#### 타이머 관리
 | 메서드 | 엔드포인트 | 설명 |
 |--------|------------|------|
 | `POST` | `/api/v1/timers` | 새 타이머 생성 |
 | `GET` | `/api/v1/timers/{timerId}` | 타이머 정보 조회 |
+| `GET` | `/api/v1/timers/shared/{shareToken}` | 공유 타이머 조회 |
 | `PUT` | `/api/v1/timers/{timerId}/target-time` | 목표 시간 변경 |
 | `POST` | `/api/v1/timers/{timerId}/timestamps` | 타임스탬프 저장 |
 | `GET` | `/api/v1/timers/{timerId}/history` | 타이머 히스토리 조회 |
+| `GET` | `/api/v1/timers/{timerId}/users/{userId}/history` | 사용자별 히스토리 조회 |
+
+#### 모니터링 & 디버깅
+| 메서드 | 엔드포인트 | 설명 |
+|--------|------------|------|
+| `GET` | `/api/v1/monitoring/completion-stats` | 타이머 완료 처리 통계 |
+| `POST` | `/api/v1/monitoring/detect-missed-timers` | 수동 누락 타이머 감지 |
+| `GET` | `/api/v1/monitoring/health` | 모니터링 서비스 상태 |
+| `GET` | `/api/v1/debug/redis/stats` | Redis 통계 정보 |
+| `GET` | `/api/v1/debug/redis/keys` | Redis 키 목록 |
+| `DELETE` | `/api/v1/debug/redis/cleanup/all-zombie-keys` | 좀비 키 정리 |
 
 ### WebSocket 엔드포인트
 
@@ -206,7 +292,39 @@ npm run preview
 open build/reports/tests/test/index.html
 ```
 
-## 📊 모니터링
+## 📊 모니터링 & 운영
+
+### 실시간 모니터링 시스템
+
+#### 1. 자동 누락 감지 (1분마다)
+```bash
+# 누락된 타이머 감지 로그 예시
+🚨 누락된 타이머 완료 처리 감지! 총 2개 타이머
+❌ 누락된 타이머: timerId=abc123, targetTime=2025-09-23T20:00:00Z, 지연시간=7분
+📊 누락 타이머 상세 분석:
+  - timerId=abc123: Keyspace Notification 자체를 받지 못함 (Redis 연결 문제)
+  - timerId=def456: 분산 락 획득 실패 (다른 서버에서 처리 중이었으나 실패)
+```
+
+#### 2. 완료 처리 통계 조회
+```bash
+curl http://localhost:8090/api/v1/monitoring/completion-stats
+{
+  "totalAttempts": 150,
+  "successfulCompletions": 147,
+  "failedAttempts": 3,
+  "successRate": 98.0
+}
+```
+
+#### 3. Redis 상태 디버깅
+```bash
+# Redis 키 현황
+curl http://localhost:8090/api/v1/debug/redis/keys
+
+# 좀비 키 정리
+curl -X DELETE http://localhost:8090/api/v1/debug/redis/cleanup/all-zombie-keys
+```
 
 ### Actuator 엔드포인트
 
@@ -214,41 +332,123 @@ open build/reports/tests/test/index.html
 - `/actuator/metrics` - 메트릭 정보
 - `/actuator/prometheus` - Prometheus 메트릭
 
-### 로그 확인
+### 로그 분석
 
 ```bash
-# 애플리케이션 로그
-tail -f logs/application.log
+# 타이머 완료 처리 로그
+grep "TTL 만료 타이머" logs/application.log
+
+# Keyspace Notification 수신 로그
+grep "Redis TTL 만료 이벤트 수신" logs/application.log
+
+# 분산 락 관련 로그
+grep "락 획득" logs/application.log
+
+# 누락 감지 로그
+grep "누락된 타이머" logs/application.log
 
 # Kafka 이벤트 로그
 grep "Timer Event" logs/application.log
 ```
 
+### 성능 메트릭
+
+#### 주요 지표
+- **타이머 완료 성공률**: 99%+ 목표
+- **처리 지연 시간**: 평균 < 1초
+- **Keyspace Notification 수신율**: 100% 목표
+- **분산 락 경쟁률**: 서버당 < 5%
+
+#### 알람 기준
+- 완료 성공률 < 95% → 즉시 알람
+- 5분 이상 지연된 타이머 발견 → 경고
+- Redis 연결 실패 → 즉시 알람
+- Kafka 이벤트 발행 실패 → 경고
+
 ## 🐛 문제 해결
 
 ### 자주 발생하는 문제들
 
-1. **WebSocket 연결 실패**
+1. **타이머 완료 처리 누락**
+   ```bash
+   # 누락 감지 수동 실행
+   curl -X POST http://localhost:8090/api/v1/monitoring/detect-missed-timers
+   
+   # Redis Keyspace Notifications 설정 확인
+   redis-cli CONFIG GET notify-keyspace-events
+   # 결과가 "Ex"가 아니면 설정 필요
+   redis-cli CONFIG SET notify-keyspace-events Ex
+   ```
+
+2. **분산 락 경쟁 문제**
+   ```bash
+   # Redis 락 상태 확인
+   curl http://localhost:8090/api/v1/debug/redis/keys | grep "timer:processing"
+   
+   # 좀비 락 정리
+   curl -X DELETE http://localhost:8090/api/v1/debug/redis/cleanup/all-zombie-keys
+   ```
+
+3. **WebSocket 연결 실패**
    ```bash
    # 백엔드 서버가 실행 중인지 확인
    curl http://localhost:8090/actuator/health
+   
+   # Redis 연결 상태 확인
+   curl http://localhost:8090/api/v1/debug/redis/stats
    ```
 
-2. **Kafka 연결 오류**
+4. **Kafka 연결 오류**
    ```bash
    # Docker 컨테이너 상태 확인
    docker-compose ps
    
    # Kafka 재시작
    docker-compose restart kafka
+   
+   # Kafka 토픽 확인
+   docker exec -it kafka kafka-topics.sh --list --bootstrap-server localhost:9092
    ```
 
-3. **프론트엔드 빌드 실패**
+5. **프론트엔드 빌드 실패**
    ```bash
    # 캐시 정리 후 재설치
    cd frontend
    rm -rf node_modules package-lock.json
    npm install
+   
+   # Vite 설정 확인
+   npm run build -- --debug
+   ```
+
+### 성능 최적화 팁
+
+1. **Redis 메모리 최적화**
+   ```bash
+   # Redis 메모리 사용량 확인
+   redis-cli INFO memory
+   
+   # 만료된 키 정리
+   redis-cli --scan --pattern "timer:*" | xargs redis-cli DEL
+   ```
+
+2. **MongoDB 인덱스 최적화**
+   ```javascript
+   // MongoDB 인덱스 확인
+   db.timers.getIndexes()
+   db.timer_completion_logs.getIndexes()
+   
+   // 성능 분석
+   db.timers.explain().find({completed: false, targetTime: {$lt: new Date()}})
+   ```
+
+3. **JVM 튜닝**
+   ```bash
+   # 힙 메모리 설정
+   java -Xms512m -Xmx2g -jar kb-echotimer.jar
+   
+   # GC 로그 활성화
+   java -XX:+UseG1GC -XX:+PrintGCDetails -jar kb-echotimer.jar
    ```
 
 ## 🤝 기여하기
