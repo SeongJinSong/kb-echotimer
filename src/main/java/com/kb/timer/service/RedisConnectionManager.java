@@ -10,6 +10,8 @@ import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Redis 연결 상태 관리 서비스
@@ -22,6 +24,12 @@ public class RedisConnectionManager {
     
     private final ReactiveRedisTemplate<String, Object> redisTemplate;
     private final ReactiveRedisTemplate<String, String> stringRedisTemplate;
+    
+    // TTL 설정 상수들
+    private static final Duration SESSION_TTL = Duration.ofHours(2);      // 세션 정보: 2시간
+    private static final Duration USER_SERVER_TTL = Duration.ofHours(1);  // 사용자-서버 매핑: 1시간  
+    private static final Duration TIMER_USERS_TTL = Duration.ofMinutes(30); // 타이머 사용자 목록: 30분
+    private static final Duration SERVER_USERS_TTL = Duration.ofMinutes(45); // 서버 사용자 목록: 45분
     
     /**
      * 사용자 연결 상태 기록
@@ -38,26 +46,34 @@ public class RedisConnectionManager {
             .build();
         
         return Mono.when(
-            // 1. 타이머별 온라인 사용자 목록에 추가
+            // 1. 타이머별 온라인 사용자 목록에 추가 + TTL 설정
             stringRedisTemplate.opsForSet().add("timer:" + timerId + ":online_users", userId)
                 .doOnNext(added -> {
                     log.info("Redis SET 추가: timer:{}:online_users, userId={}, added={}", timerId, userId, added);
                     if (added == 0) {
                         log.warn("사용자가 이미 존재함: userId={}, timerId={}", userId, timerId);
                     }
-                }),
+                })
+                .then(stringRedisTemplate.expire("timer:" + timerId + ":online_users", TIMER_USERS_TTL))
+                .doOnNext(success -> log.debug("타이머 사용자 목록 TTL 설정: timer:{}:online_users, ttl={}분", 
+                    timerId, TIMER_USERS_TTL.toMinutes())),
             
-            // 2. 사용자별 연결 서버 정보 저장
-            stringRedisTemplate.opsForValue().set("user:" + userId + ":server", serverId)
-                .doOnNext(result -> log.info("Redis VALUE 저장: user:{}:server = {}", userId, serverId)),
+            // 2. 사용자별 연결 서버 정보 저장 + TTL 설정
+            stringRedisTemplate.opsForValue().set("user:" + userId + ":server", serverId, USER_SERVER_TTL)
+                .doOnNext(result -> log.info("Redis VALUE 저장: user:{}:server = {} (TTL: {}분)", 
+                    userId, serverId, USER_SERVER_TTL.toMinutes())),
             
-            // 3. 서버별 연결된 사용자 목록에 추가
+            // 3. 서버별 연결된 사용자 목록에 추가 + TTL 설정
             stringRedisTemplate.opsForSet().add("server:" + serverId + ":users", userId)
-                .doOnNext(added -> log.info("Redis SET 추가: server:{}:users, userId={}, added={}", serverId, userId, added)),
+                .doOnNext(added -> log.info("Redis SET 추가: server:{}:users, userId={}, added={}", serverId, userId, added))
+                .then(stringRedisTemplate.expire("server:" + serverId + ":users", SERVER_USERS_TTL))
+                .doOnNext(success -> log.debug("서버 사용자 목록 TTL 설정: server:{}:users, ttl={}분", 
+                    serverId, SERVER_USERS_TTL.toMinutes())),
             
-            // 4. 세션 정보 저장 (TTL 1시간)
-            redisTemplate.opsForValue().set("session:" + sessionId, sessionInfo, Duration.ofHours(1))
-                .doOnNext(result -> log.info("Redis SESSION 저장: session:{} = {}", sessionId, sessionInfo))
+            // 4. 세션 정보 저장 + TTL 설정
+            redisTemplate.opsForValue().set("session:" + sessionId, sessionInfo, SESSION_TTL)
+                .doOnNext(result -> log.info("Redis SESSION 저장: session:{} = {} (TTL: {}시간)", 
+                    sessionId, sessionInfo, SESSION_TTL.toHours()))
         ).doOnSuccess(ignored -> 
             log.info("User connection recorded: timerId={}, userId={}, serverId={}, sessionId={}", 
                 timerId, userId, serverId, sessionId)
@@ -155,16 +171,19 @@ public class RedisConnectionManager {
     
     /**
      * 하트비트 업데이트
-     * 클라이언트 연결 상태 확인용
+     * 클라이언트 연결 상태 확인용 + TTL 갱신
      */
     public Mono<Void> updateHeartbeat(String sessionId) {
         return getSessionInfo(sessionId)
             .flatMap(sessionInfo -> {
                 sessionInfo.setLastHeartbeat(Instant.now());
+                
+                // 세션 정보 업데이트 + TTL 갱신
                 return redisTemplate.opsForValue()
-                    .set("session:" + sessionId, sessionInfo, Duration.ofHours(1));
-            })
-            .then();
+                    .set("session:" + sessionId, sessionInfo, SESSION_TTL)
+                    .then(refreshUserTTL(sessionInfo.getTimerId(), sessionInfo.getUserId(), 
+                                       sessionInfo.getServerId(), sessionId));
+            });
     }
 
     /**
@@ -200,5 +219,58 @@ public class RedisConnectionManager {
         return Mono.<Void>empty()
                 .doOnSuccess(ignored -> log.debug("만료된 연결 정리 완료"))
                 .doOnError(error -> log.error("만료된 연결 정리 실패: {}", error.getMessage(), error));
+    }
+    
+    /**
+     * 활성 사용자의 TTL 갱신 (헬스체크)
+     * WebSocket 하트비트나 활동 감지 시 호출
+     */
+    public Mono<Void> refreshUserTTL(String timerId, String userId, String serverId, String sessionId) {
+        log.debug("사용자 TTL 갱신: timerId={}, userId={}, serverId={}, sessionId={}", 
+            timerId, userId, serverId, sessionId);
+        
+        return Mono.when(
+            // 1. 타이머 사용자 목록 TTL 갱신
+            stringRedisTemplate.expire("timer:" + timerId + ":online_users", TIMER_USERS_TTL)
+                .doOnNext(success -> log.trace("타이머 사용자 목록 TTL 갱신: timer:{}:online_users", timerId)),
+            
+            // 2. 사용자-서버 매핑 TTL 갱신  
+            stringRedisTemplate.expire("user:" + userId + ":server", USER_SERVER_TTL)
+                .doOnNext(success -> log.trace("사용자 서버 정보 TTL 갱신: user:{}:server", userId)),
+            
+            // 3. 서버 사용자 목록 TTL 갱신
+            stringRedisTemplate.expire("server:" + serverId + ":users", SERVER_USERS_TTL)
+                .doOnNext(success -> log.trace("서버 사용자 목록 TTL 갱신: server:{}:users", serverId)),
+            
+            // 4. 세션 정보 TTL 갱신
+            redisTemplate.expire("session:" + sessionId, SESSION_TTL)
+                .doOnNext(success -> log.trace("세션 정보 TTL 갱신: session:{}", sessionId))
+        )
+        .doOnSuccess(ignored -> log.debug("사용자 TTL 갱신 완료: userId={}", userId))
+        .doOnError(error -> log.warn("사용자 TTL 갱신 실패: userId={}, error={}", userId, error.getMessage()));
+    }
+    
+    /**
+     * TTL 상태 조회 (디버깅용)
+     */
+    public Mono<Map<String, Long>> getTTLStatus(String timerId, String userId, String serverId, String sessionId) {
+        return Mono.zip(
+            stringRedisTemplate.getExpire("timer:" + timerId + ":online_users")
+                .map(Duration::getSeconds).defaultIfEmpty(-1L),
+            stringRedisTemplate.getExpire("user:" + userId + ":server")
+                .map(Duration::getSeconds).defaultIfEmpty(-1L),
+            stringRedisTemplate.getExpire("server:" + serverId + ":users")
+                .map(Duration::getSeconds).defaultIfEmpty(-1L),
+            redisTemplate.getExpire("session:" + sessionId)
+                .map(Duration::getSeconds).defaultIfEmpty(-1L)
+        )
+        .map(tuple -> {
+            Map<String, Long> ttlStatus = new HashMap<>();
+            ttlStatus.put("timer_users_ttl", tuple.getT1());
+            ttlStatus.put("user_server_ttl", tuple.getT2());
+            ttlStatus.put("server_users_ttl", tuple.getT3());
+            ttlStatus.put("session_ttl", tuple.getT4());
+            return ttlStatus;
+        });
     }
 }
