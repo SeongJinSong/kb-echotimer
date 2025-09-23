@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
@@ -30,6 +31,113 @@ public class TimerService {
     
     @Value("${server.instance.id}")
     private String serverId;
+
+    /**
+     * 새로운 타이머 생성
+     * @param targetTimeSeconds 목표 시간 (초)
+     * @param ownerId 소유자 ID
+     * @return 타이머 정보
+     */
+    public Mono<TimerResponse> createTimer(long targetTimeSeconds, String ownerId) {
+        String timerId = UUID.randomUUID().toString();
+        Instant now = Instant.now();
+        Instant targetTime = now.plusSeconds(targetTimeSeconds);
+        
+        log.info("새 타이머 생성: {} (목표: {}초, 소유자: {})", timerId, targetTimeSeconds, ownerId);
+        
+        TimerResponse response = TimerResponse.builder()
+                .timerId(timerId)
+                .targetTime(targetTime)
+                .serverTime(now)
+                .remainingTime(Duration.ofSeconds(targetTimeSeconds))
+                .completed(false)
+                .ownerId(ownerId)
+                .onlineUserCount(0)
+                .shareToken(generateShareUrl(timerId))
+                .userRole("OWNER")
+                .build();
+        
+        return Mono.just(response);
+    }
+
+    /**
+     * 특정 타이머의 정보를 조회합니다.
+     * @param timerId 타이머 ID
+     * @param userId 요청 사용자 ID (권한 확인용)
+     * @return 타이머 정보
+     */
+    public Mono<TimerResponse> getTimerInfo(String timerId, String userId) {
+        log.debug("타이머 정보 조회: {}", timerId);
+        Instant now = Instant.now();
+        // TODO: 실제 타이머 정보 (예: 목표 시간, 남은 시간, 온라인 사용자 수 등)를 MongoDB 또는 Redis에서 조회하여 반환
+        // 현재는 더미 데이터 반환
+        return Mono.just(TimerResponse.builder()
+                .timerId(timerId)
+                .userId(userId)
+                .targetTime(now.plusSeconds(60)) // 예시: 60초 남음
+                .serverTime(now)
+                .remainingTime(Duration.ofSeconds(60))
+                .completed(false)
+                .ownerId("owner123")
+                .onlineUserCount(1)
+                .shareToken(generateShareUrl(timerId))
+                .userRole("VIEWER")
+                .build());
+    }
+
+    /**
+     * 타이머의 목표 시간을 변경합니다.
+     * @param timerId 타이머 ID
+     * @param newTargetTime 새로운 목표 시간
+     * @param changedBy 변경한 사용자 ID
+     * @return 변경된 타이머 정보
+     */
+    public Mono<TimerResponse> changeTargetTime(String timerId, Instant newTargetTime, String changedBy) {
+        log.info("타이머 목표 시간 변경: {} - 새로운 목표: {} (변경자: {})", 
+                timerId, newTargetTime, changedBy);
+        
+        TargetTimeChangedEvent event = TargetTimeChangedEvent.builder()
+                .eventId(UUID.randomUUID().toString())
+                .timerId(timerId)
+                .newTargetTime(newTargetTime)
+                .oldTargetTime(Instant.now()) // TODO: 실제 이전 목표 시간 조회
+                .changedBy(changedBy)
+                .originServerId(serverId)
+                .timestamp(Instant.now())
+                .build();
+        
+        return kafkaEventPublisher.publishTimerEvent(event)
+                .thenReturn(TimerResponse.builder()
+                        .timerId(timerId)
+                        .targetTime(newTargetTime)
+                        .serverTime(Instant.now())
+                        .remainingTime(Duration.between(Instant.now(), newTargetTime))
+                        .ownerId(changedBy) // 임시
+                        .completed(false)
+                        .build());
+    }
+
+    /**
+     * 특정 타이머의 모든 타임스탬프 기록을 조회합니다.
+     * @param timerId 타이머 ID
+     * @return 타임스탬프 엔트리 목록
+     */
+    public Flux<TimestampEntry> getTimerHistory(String timerId) {
+        log.debug("타임스탬프 목록 조회: {}", timerId);
+        return timestampRepository.findByTimerIdOrderByCreatedAtDesc(timerId)
+                .doOnNext(entry -> log.debug("타임스탬프 조회: {} - 사용자: {}, 시간: {}", 
+                        entry.getTimerId(), entry.getUserId(), entry.getTargetTime()))
+                .doOnError(e -> log.error("타임스탬프 목록 조회 실패: timerId={}. Error: {}", timerId, e.getMessage(), e));
+    }
+
+    /**
+     * 공유 URL 생성
+     * @param timerId 타이머 ID
+     * @return 공유 URL
+     */
+    private String generateShareUrl(String timerId) {
+        return "/timer/" + timerId;
+    }
     
     /**
      * 새로운 타이머를 생성하거나 기존 타이머의 타임스탬프를 저장합니다.
