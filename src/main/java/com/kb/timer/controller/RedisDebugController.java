@@ -11,7 +11,6 @@ import reactor.core.publisher.Mono;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Redis 상태 디버깅용 컨트롤러
@@ -255,5 +254,66 @@ public class RedisDebugController {
         )
         .doOnNext(stats -> log.info("Redis 통계: {}", stats))
         .doOnError(error -> log.error("Redis 통계 조회 실패: {}", error.getMessage(), error));
+    }
+    
+    /**
+     * TTL 상태 조회
+     * GET /api/v1/debug/redis/ttl?timerId=xxx&userId=xxx&serverId=xxx&sessionId=xxx
+     */
+    @GetMapping("/ttl")
+    public Mono<Map<String, Object>> getTTLStatus(
+            @RequestParam String timerId,
+            @RequestParam String userId, 
+            @RequestParam String serverId,
+            @RequestParam String sessionId) {
+        log.info("TTL 상태 조회 요청: timerId={}, userId={}, serverId={}, sessionId={}", 
+            timerId, userId, serverId, sessionId);
+        
+        return redisConnectionManager.getTTLStatus(timerId, userId, serverId, sessionId)
+                .map(ttlStatus -> {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("timerId", timerId);
+                    response.put("userId", userId);
+                    response.put("serverId", serverId);
+                    response.put("sessionId", sessionId);
+                    response.put("ttlStatus", ttlStatus);
+                    response.put("description", Map.of(
+                        "timer_users_ttl", "타이머 사용자 목록 TTL (초)",
+                        "user_server_ttl", "사용자-서버 매핑 TTL (초)",
+                        "server_users_ttl", "서버 사용자 목록 TTL (초)",
+                        "session_ttl", "세션 정보 TTL (초)",
+                        "note", "-1은 키가 존재하지 않거나 TTL이 설정되지 않음을 의미"
+                    ));
+                    return response;
+                })
+                .doOnNext(response -> log.info("TTL 상태 조회 완료: {}", response))
+                .doOnError(error -> log.error("TTL 상태 조회 실패: {}", error.getMessage(), error));
+    }
+    
+    /**
+     * 사용자 TTL 갱신
+     * POST /api/v1/debug/redis/refresh-ttl?timerId=xxx&userId=xxx&serverId=xxx&sessionId=xxx
+     */
+    @PostMapping("/refresh-ttl")
+    public Mono<Map<String, Object>> refreshUserTTL(
+            @RequestParam String timerId,
+            @RequestParam String userId,
+            @RequestParam String serverId,
+            @RequestParam String sessionId) {
+        log.info("사용자 TTL 갱신 요청: timerId={}, userId={}, serverId={}, sessionId={}", 
+            timerId, userId, serverId, sessionId);
+        
+        return redisConnectionManager.refreshUserTTL(timerId, userId, serverId, sessionId)
+                .then(redisConnectionManager.getTTLStatus(timerId, userId, serverId, sessionId))
+                .map(ttlStatus -> {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("message", "TTL 갱신 완료");
+                    response.put("timerId", timerId);
+                    response.put("userId", userId);
+                    response.put("updatedTTL", ttlStatus);
+                    return response;
+                })
+                .doOnNext(response -> log.info("사용자 TTL 갱신 완료: {}", response))
+                .doOnError(error -> log.error("사용자 TTL 갱신 실패: {}", error.getMessage(), error));
     }
 }
