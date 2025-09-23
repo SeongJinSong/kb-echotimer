@@ -84,7 +84,57 @@ SINTER timer:{id}:online_users server:{id}:users
 - 📋 **상세 분석**: 실패 원인별 분류 및 로그
 - 🔄 **자동 복구**: 락 만료 시 다른 서버가 자동 처리
 
-### 5. WebSocket vs SSE 기술 선택
+### 5. TTL 기반 자동 정리 시스템
+```
+Redis TTL + 계층적 만료 시간으로 좀비 키 자동 정리
+서버 비정상 종료 시에도 메모리 누수 방지 + 운영 부담 제거
+```
+
+**TTL 계층 구조:**
+- 🕐 **세션 정보**: 2시간 TTL (가장 중요한 연결 정보)
+- 👤 **사용자-서버 매핑**: 1시간 TTL (연결 상태 추적)  
+- 🏢 **서버 사용자 목록**: 45분 TTL (서버별 사용자 관리)
+- ⏰ **타이머 사용자 목록**: 30분 TTL (빠른 정리)
+
+**자동 정리 메커니즘:**
+- 🔄 **실시간 TTL 갱신**: WebSocket 하트비트 시 자동 연장
+- 🧹 **점진적 정리**: 중요도에 따른 차등 TTL 적용
+- 🛡️ **좀비 키 방지**: 서버 크래시 시에도 자동 정리 보장
+- 📊 **TTL 모니터링**: 디버깅 API로 실시간 TTL 상태 확인
+
+**운영 효과:**
+```
+Before: 서버 크래시 → 좀비 키 영구 잔존 → 수동 정리 필요
+After:  서버 크래시 → 최대 2시간 후 자동 정리 → 완전 자동화
+```
+
+### 6. 이벤트 기반 아키텍처 (순환 의존성 해결)
+```
+ApplicationEventPublisher 기반 느슨한 결합 설계
+서비스 간 직접 의존성 제거 + 확장 가능한 이벤트 시스템
+```
+
+**이벤트 기반 설계:**
+- 🔄 **TimerScheduleEvent**: 타이머 스케줄링 (SCHEDULE, UPDATE, CANCEL)
+- ⏰ **TimerCompletionEvent**: TTL 만료 시 타이머 완료 처리
+- 🎯 **서버 내부 이벤트**: ApplicationEventPublisher로 동일 서버 내에서만 전파
+- 🌐 **서버 간 이벤트**: Kafka로 분산 환경 전체에 브로드캐스트
+
+**순환 의존성 해결:**
+```
+Before: TimerService ↔ RedisTTLSchedulerService (순환 의존성)
+After:  TimerService → Event → RedisTTLSchedulerService (단방향)
+```
+
+**이벤트 플로우:**
+```
+1. 타이머 생성: TimerService → TimerScheduleEvent → RedisTTLSchedulerService
+2. TTL 만료: RedisTTLSchedulerService → TimerCompletionEvent → TimerService
+3. Kafka 발행: TimerService → KafkaEventPublisher → 모든 서버
+4. WebSocket: KafkaEventConsumer → SimpMessagingTemplate → 클라이언트
+```
+
+### 7. WebSocket vs SSE 기술 선택
 ```
 실시간 양방향 통신을 위한 WebSocket (STOMP) 채택
 클라이언트 ↔ 서버 즉시 상호작용 + 효율적 브로드캐스트
@@ -116,7 +166,10 @@ kb-echotimer/
 │   ├── controller/                      # REST API & WebSocket 컨트롤러
 │   ├── service/                         # 비즈니스 로직
 │   ├── repository/                      # 데이터 접근 계층
-│   ├── model/                          # 엔티티 및 DTO
+│   ├── model/                          # 엔티티, DTO, 이벤트
+│   │   ├── entity/                     # MongoDB 엔티티 (Timer, TimestampEntry 등)
+│   │   ├── dto/                        # 데이터 전송 객체
+│   │   └── event/                      # 이벤트 클래스 (순환 의존성 해결)
 │   ├── config/                         # 설정 클래스
 │   └── util/                           # 유틸리티
 ├── frontend/                           # 프론트엔드 소스
@@ -228,6 +281,8 @@ java -jar build/libs/kb-echotimer-1.0.0.jar
 | `GET` | `/api/v1/monitoring/health` | 모니터링 서비스 상태 |
 | `GET` | `/api/v1/debug/redis/stats` | Redis 통계 정보 |
 | `GET` | `/api/v1/debug/redis/keys` | Redis 키 목록 |
+| `GET` | `/api/v1/debug/redis/ttl` | TTL 상태 조회 |
+| `POST` | `/api/v1/debug/redis/refresh-ttl` | 사용자 TTL 갱신 |
 | `DELETE` | `/api/v1/debug/redis/cleanup/all-zombie-keys` | 좀비 키 정리 |
 
 ### WebSocket 엔드포인트
@@ -322,6 +377,40 @@ curl http://localhost:8090/api/v1/monitoring/completion-stats
 # Redis 키 현황
 curl http://localhost:8090/api/v1/debug/redis/keys
 
+# TTL 상태 조회 (좀비 키 방지 확인)
+curl "http://localhost:8090/api/v1/debug/redis/ttl?timerId=abc123&userId=user-456&serverId=server-local-789&sessionId=session-xyz"
+{
+  "timerId": "abc123",
+  "userId": "user-456", 
+  "ttlStatus": {
+    "timer_users_ttl": 1800,     // 30분 (초 단위)
+    "user_server_ttl": 3600,     // 1시간
+    "server_users_ttl": 2700,    // 45분
+    "session_ttl": 7200          // 2시간
+  },
+  "description": {
+    "timer_users_ttl": "타이머 사용자 목록 TTL (초)",
+    "user_server_ttl": "사용자-서버 매핑 TTL (초)",
+    "server_users_ttl": "서버 사용자 목록 TTL (초)", 
+    "session_ttl": "세션 정보 TTL (초)",
+    "note": "-1은 키가 존재하지 않거나 TTL이 설정되지 않음을 의미"
+  }
+}
+
+# 사용자 TTL 수동 갱신 (활성 사용자 연장)
+curl -X POST "http://localhost:8090/api/v1/debug/redis/refresh-ttl?timerId=abc123&userId=user-456&serverId=server-local-789&sessionId=session-xyz"
+{
+  "message": "TTL 갱신 완료",
+  "timerId": "abc123",
+  "userId": "user-456",
+  "updatedTTL": {
+    "timer_users_ttl": 1800,
+    "user_server_ttl": 3600,
+    "server_users_ttl": 2700,
+    "session_ttl": 7200
+  }
+}
+
 # 좀비 키 정리
 curl -X DELETE http://localhost:8090/api/v1/debug/redis/cleanup/all-zombie-keys
 ```
@@ -349,6 +438,24 @@ grep "누락된 타이머" logs/application.log
 
 # Kafka 이벤트 로그
 grep "Timer Event" logs/application.log
+
+# TTL 설정 로그
+grep "TTL 설정" logs/application.log
+
+# TTL 갱신 로그  
+grep "TTL 갱신" logs/application.log
+
+# 좀비 키 정리 로그
+grep "좀비 키" logs/application.log
+
+# 이벤트 기반 아키텍처 로그
+grep "이벤트 발행" logs/application.log
+
+# 타이머 스케줄 이벤트 로그
+grep "TimerScheduleEvent" logs/application.log
+
+# 타이머 완료 이벤트 로그  
+grep "TimerCompletionEvent" logs/application.log
 ```
 
 ### 성능 메트릭
@@ -358,12 +465,30 @@ grep "Timer Event" logs/application.log
 - **처리 지연 시간**: 평균 < 1초
 - **Keyspace Notification 수신율**: 100% 목표
 - **분산 락 경쟁률**: 서버당 < 5%
+- **TTL 자동 정리율**: 100% 목표 (좀비 키 0개)
+- **Redis 메모리 사용량**: TTL로 인한 안정적 유지
+
+#### TTL 관련 메트릭
+- **세션 TTL 갱신 빈도**: 활성 사용자당 분당 1-2회
+- **좀비 키 발생률**: 서버 크래시당 < 0.1%
+- **TTL 만료 정확도**: ±5초 이내
+- **자동 정리 지연 시간**: 최대 2시간 (세션 TTL)
+
+#### 이벤트 시스템 메트릭
+- **이벤트 발행 성공률**: 99.9%+ 목표 (ApplicationEventPublisher)
+- **이벤트 처리 지연 시간**: 평균 < 10ms (서버 내부)
+- **순환 의존성**: 0개 (이벤트 기반으로 완전 해결)
+- **서비스 결합도**: 느슨한 결합 (이벤트 기반)
 
 #### 알람 기준
 - 완료 성공률 < 95% → 즉시 알람
 - 5분 이상 지연된 타이머 발견 → 경고
 - Redis 연결 실패 → 즉시 알람
 - Kafka 이벤트 발행 실패 → 경고
+- **좀비 키 10개 이상 발견** → 경고
+- **TTL 설정 실패율 > 1%** → 경고
+- **이벤트 발행 실패율 > 0.1%** → 경고
+- **이벤트 처리 지연 > 100ms** → 경고
 
 ## 🐛 문제 해결
 
@@ -410,7 +535,35 @@ grep "Timer Event" logs/application.log
    docker exec -it kafka kafka-topics.sh --list --bootstrap-server localhost:9092
    ```
 
-5. **프론트엔드 빌드 실패**
+5. **좀비 키 발생 (TTL 미적용)**
+   ```bash
+   # 좀비 키 확인
+   curl http://localhost:8090/api/v1/debug/redis/keys | grep -E "(timer|session|user|server)"
+   
+   # TTL 상태 확인 (특정 키)
+   curl "http://localhost:8090/api/v1/debug/redis/ttl?timerId=abc&userId=user123&serverId=server456&sessionId=sess789"
+   
+   # 좀비 키 강제 정리
+   curl -X DELETE http://localhost:8090/api/v1/debug/redis/cleanup/all-zombie-keys
+   
+   # Redis에서 직접 TTL 확인
+   docker exec redis redis-cli TTL "session:sessionId"
+   # -1: TTL 없음 (좀비 키), -2: 키 없음, 양수: 남은 시간(초)
+   ```
+
+6. **TTL 갱신 실패**
+   ```bash
+   # 활성 사용자 TTL 수동 갱신
+   curl -X POST "http://localhost:8090/api/v1/debug/redis/refresh-ttl?timerId=abc&userId=user123&serverId=server456&sessionId=sess789"
+   
+   # Redis 연결 상태 확인
+   curl http://localhost:8090/api/v1/debug/redis/stats
+   
+   # 서버 재시작 (TTL 설정 로직 재초기화)
+   ./gradlew bootRun
+   ```
+
+7. **프론트엔드 빌드 실패**
    ```bash
    # 캐시 정리 후 재설치
    cd frontend
@@ -419,6 +572,33 @@ grep "Timer Event" logs/application.log
    
    # Vite 설정 확인
    npm run build -- --debug
+   ```
+
+8. **이벤트 발행/처리 실패 (순환 의존성)**
+   ```bash
+   # 순환 의존성 확인
+   grep -r "circular dependency" logs/application.log
+   
+   # 이벤트 발행 실패 로그 확인
+   grep "이벤트 발행.*실패" logs/application.log
+   
+   # ApplicationEventPublisher 상태 확인
+   curl http://localhost:8090/actuator/beans | jq '.contexts.application.beans | keys | map(select(contains("Event")))'
+   
+   # 서비스 재시작 (이벤트 리스너 재등록)
+   ./gradlew bootRun
+   ```
+
+9. **이벤트 처리 지연**
+   ```bash
+   # 이벤트 처리 시간 분석
+   grep "이벤트.*처리.*완료" logs/application.log | tail -20
+   
+   # 스레드 풀 상태 확인
+   curl http://localhost:8090/actuator/metrics/executor.active
+   
+   # JVM 메모리 상태 확인
+   curl http://localhost:8090/actuator/metrics/jvm.memory.used
    ```
 
 ### 성능 최적화 팁
