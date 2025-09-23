@@ -79,7 +79,19 @@ public class WebSocketEventHandler {
             String timerId = extractTimerIdFromDestination(destination);
             if (timerId != null) {
                 log.info("타이머 토픽 구독: sessionId={}, timerId={}", sessionId, timerId);
-                // 실제 구독 처리는 @SubscribeMapping에서 수행됨
+                
+                // Redis에 사용자 연결 정보 저장
+                String userId = extractUserIdFromHeaders(headerAccessor);
+                String serverId = serverInstanceIdGenerator.getServerInstanceId();
+                
+                log.info("타이머 구독 요청: timerId={}, userId={}, sessionId={}", timerId, userId, sessionId);
+                
+                redisConnectionManager.recordUserConnection(timerId, userId, serverId, sessionId)
+                    .then(timerService.publishUserJoinedEvent(timerId, userId))
+                    .doOnSuccess(ignored -> log.info("타이머 구독 완료: timerId={}, userId={}", timerId, userId))
+                    .doOnError(error -> log.error("타이머 구독 실패: timerId={}, userId={}, error={}", 
+                              timerId, userId, error.getMessage(), error))
+                    .subscribe(); // 비동기 처리
             }
         }
     }
@@ -112,5 +124,23 @@ public class WebSocketEventHandler {
             return destination.substring("/topic/timer/".length());
         }
         return null;
+    }
+    
+    /**
+     * WebSocket 헤더에서 사용자 ID 추출
+     * 
+     * @param headerAccessor WebSocket 헤더 접근자
+     * @return 사용자 ID
+     */
+    private String extractUserIdFromHeaders(StompHeaderAccessor headerAccessor) {
+        // 헤더에서 userId 추출 시도
+        String userId = headerAccessor.getFirstNativeHeader("userId");
+        if (userId != null && !userId.isEmpty()) {
+            return userId;
+        }
+        
+        // 헤더에 없으면 세션 ID 기반으로 생성 (fallback)
+        String sessionId = headerAccessor.getSessionId();
+        return "user-" + sessionId.substring(0, 8);
     }
 }

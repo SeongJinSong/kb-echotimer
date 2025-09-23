@@ -52,7 +52,7 @@ public class TimerWebSocketController {
         log.info("타이머 구독 요청: timerId={}, userId={}, sessionId={}", timerId, userId, sessionId);
         
         // Redis에 연결 정보 기록
-        return redisConnectionManager.recordUserConnection(timerId, userId, sessionId, serverId)
+        return redisConnectionManager.recordUserConnection(timerId, userId, serverId, sessionId)
                 .then(timerService.publishUserJoinedEvent(timerId, userId))
                 .then(getCurrentTimerState(timerId, userId))
                 .doOnSuccess(response -> log.info("타이머 구독 완료: timerId={}, userId={}", timerId, userId))
@@ -182,8 +182,13 @@ public class TimerWebSocketController {
      * @return 사용자 ID
      */
     private String extractUserId(SimpMessageHeaderAccessor headerAccessor) {
-        // TODO: 실제 인증 시스템과 연동하여 사용자 ID 추출
-        // 현재는 세션 ID를 사용자 ID로 사용
+        // 헤더에서 userId 추출 시도
+        String userId = headerAccessor.getFirstNativeHeader("userId");
+        if (userId != null && !userId.isEmpty()) {
+            return userId;
+        }
+        
+        // 헤더에 없으면 세션 ID 기반으로 생성 (fallback)
         String sessionId = headerAccessor.getSessionId();
         return "user-" + sessionId.substring(0, 8);
     }

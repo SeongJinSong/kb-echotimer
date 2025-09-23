@@ -13,24 +13,24 @@ import reactor.core.publisher.Flux;
 public interface TimestampEntryRepository extends ReactiveMongoRepository<TimestampEntry, String> {
     
     /**
-     * 특정 타이머의 타임스탬프 조회
+     * 특정 타이머의 타임스탬프 조회 (현재 시각 기준 오름차순)
      * @param timerId 타이머 ID
      * @return 타임스탬프 엔트리 목록
      */
-    Flux<TimestampEntry> findByTimerIdOrderByCreatedAtDesc(String timerId);
+    Flux<TimestampEntry> findByTimerIdOrderByCreatedAtAsc(String timerId);
     
     /**
-     * 특정 사용자의 타임스탬프 조회
+     * 특정 사용자의 타임스탬프 조회 (현재 시각 기준 오름차순)
      * @param userId 사용자 ID
      * @return 타임스탬프 엔트리 목록
      */
-    Flux<TimestampEntry> findByUserIdOrderByCreatedAtDesc(String userId);
+    Flux<TimestampEntry> findByUserIdOrderByCreatedAtAsc(String userId);
     
     /**
-     * 특정 타이머와 사용자의 타임스탬프 조회
+     * 특정 타이머와 사용자의 타임스탬프 조회 (현재 시각 기준 오름차순)
      * @param timerId 타이머 ID
      * @param userId 사용자 ID
      * @return 타임스탬프 엔트리 목록
      */
-    Flux<TimestampEntry> findByTimerIdAndUserIdOrderByCreatedAtDesc(String timerId, String userId);
+    Flux<TimestampEntry> findByTimerIdAndUserIdOrderByCreatedAtAsc(String timerId, String userId);
 }

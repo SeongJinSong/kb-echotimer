@@ -39,19 +39,31 @@ public class RedisConnectionManager {
         
         return Mono.when(
             // 1. 타이머별 온라인 사용자 목록에 추가
-            stringRedisTemplate.opsForSet().add("timer:" + timerId + ":online_users", userId),
+            stringRedisTemplate.opsForSet().add("timer:" + timerId + ":online_users", userId)
+                .doOnNext(added -> {
+                    log.info("Redis SET 추가: timer:{}:online_users, userId={}, added={}", timerId, userId, added);
+                    if (added == 0) {
+                        log.warn("사용자가 이미 존재함: userId={}, timerId={}", userId, timerId);
+                    }
+                }),
             
             // 2. 사용자별 연결 서버 정보 저장
-            stringRedisTemplate.opsForValue().set("user:" + userId + ":server", serverId),
+            stringRedisTemplate.opsForValue().set("user:" + userId + ":server", serverId)
+                .doOnNext(result -> log.info("Redis VALUE 저장: user:{}:server = {}", userId, serverId)),
             
             // 3. 서버별 연결된 사용자 목록에 추가
-            stringRedisTemplate.opsForSet().add("server:" + serverId + ":users", userId),
+            stringRedisTemplate.opsForSet().add("server:" + serverId + ":users", userId)
+                .doOnNext(added -> log.info("Redis SET 추가: server:{}:users, userId={}, added={}", serverId, userId, added)),
             
             // 4. 세션 정보 저장 (TTL 1시간)
             redisTemplate.opsForValue().set("session:" + sessionId, sessionInfo, Duration.ofHours(1))
+                .doOnNext(result -> log.info("Redis SESSION 저장: session:{} = {}", sessionId, sessionInfo))
         ).doOnSuccess(ignored -> 
-            log.debug("User connection recorded: timerId={}, userId={}, serverId={}", 
-                timerId, userId, serverId)
+            log.info("User connection recorded: timerId={}, userId={}, serverId={}, sessionId={}", 
+                timerId, userId, serverId, sessionId)
+        ).doOnError(e -> 
+            log.error("User connection record failed: timerId={}, userId={}, error={}", 
+                timerId, userId, e.getMessage(), e)
         );
     }
     
@@ -117,7 +129,9 @@ public class RedisConnectionManager {
      */
     public Mono<Long> getOnlineUserCount(String timerId) {
         return stringRedisTemplate.opsForSet()
-            .size("timer:" + timerId + ":online_users");
+            .size("timer:" + timerId + ":online_users")
+            .doOnNext(count -> log.info("온라인 사용자 수 조회: timerId={}, count={}", timerId, count))
+            .doOnError(e -> log.error("온라인 사용자 수 조회 실패: timerId={}, error={}", timerId, e.getMessage()));
     }
     
     /**
