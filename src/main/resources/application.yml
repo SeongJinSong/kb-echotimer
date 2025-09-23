@@ -1,0 +1,84 @@
+spring:
+  application:
+    name: kb-timer-service
+  
+  # MongoDB 및 Redis 설정
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/timer_service
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 10
+          max-idle: 10
+          min-idle: 1
+          
+  # Kafka 설정
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: 1
+      retries: 3
+      batch-size: 16384
+      linger-ms: 5
+      buffer-memory: 33554432
+    consumer:
+      group-id: timer-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: latest
+      enable-auto-commit: true
+      auto-commit-interval: 1000ms
+      max-poll-records: 500
+      properties:
+        spring.json.trusted.packages: "com.kb.timer.model.event"
+
+# 서버 설정
+server:
+  port: 8090
+  instance:
+    id: ${HOSTNAME:server-local}-${random.int(1000,9999)}
+
+# 로깅 설정
+logging:
+  level:
+    com.kb.timer: DEBUG
+    org.springframework.kafka: INFO
+    org.springframework.data.mongodb: INFO
+    org.springframework.data.redis: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%logger{36}] - %msg%n"
+
+# 액추에이터 설정
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+# 커스텀 설정
+timer:
+  kafka:
+    topics:
+      timer-events: timer-events
+      user-actions: user-actions
+    partitions: 6
+    replication-factor: 1
+  redis:
+    connection-ttl: 3600 # 1시간
+    heartbeat-interval: 30 # 30초
+  mongodb:
+    timestamp-ttl: 7776000 # 90일 (초 단위)
+
