@@ -4,6 +4,7 @@ import com.kb.timer.model.entity.Timer;
 import com.kb.timer.util.ServerInstanceIdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
@@ -19,7 +20,6 @@ import java.util.concurrent.ScheduledFuture;
  * Redis 분산 락을 사용하여 여러 서버 중 하나만 특정 타이머를 스케줄링하도록 함
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class DistributedTimerSchedulerService {
 
@@ -27,6 +27,16 @@ public class DistributedTimerSchedulerService {
     private final TimerService timerService;
     private final ReactiveRedisTemplate<String, String> stringRedisTemplate;
     private final ServerInstanceIdGenerator serverInstanceIdGenerator;
+    
+    public DistributedTimerSchedulerService(@Qualifier("timerTaskScheduler") TaskScheduler taskScheduler,
+                                          TimerService timerService,
+                                          ReactiveRedisTemplate<String, String> stringRedisTemplate,
+                                          ServerInstanceIdGenerator serverInstanceIdGenerator) {
+        this.taskScheduler = taskScheduler;
+        this.timerService = timerService;
+        this.stringRedisTemplate = stringRedisTemplate;
+        this.serverInstanceIdGenerator = serverInstanceIdGenerator;
+    }
     
     // 타이머 ID -> ScheduledFuture 매핑 (이 서버에서 스케줄링 중인 타이머들)
     private final ConcurrentHashMap<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();

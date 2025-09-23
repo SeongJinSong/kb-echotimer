@@ -4,11 +4,14 @@ import com.kb.timer.model.dto.TimerResponse;
 import com.kb.timer.model.entity.Timer;
 import com.kb.timer.model.entity.TimestampEntry;
 import com.kb.timer.model.event.*;
+import com.kb.timer.model.event.TimerCompletionEvent;
 import com.kb.timer.repository.TimerRepository;
 import com.kb.timer.repository.TimestampEntryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -33,7 +36,7 @@ public class TimerService {
     private final KafkaEventPublisher kafkaEventPublisher;
     private final RedisConnectionManager connectionManager;
     private final SimpMessagingTemplate messagingTemplate;
-    private final RedisTTLSchedulerService redisTTLSchedulerService;
+    private final ApplicationEventPublisher eventPublisher;
     
     @Value("${server.instance.id}")
     private String serverId;
@@ -64,9 +67,9 @@ public class TimerService {
 
         return timerRepository.save(timer)
                 .doOnNext(savedTimer -> {
-                    // 타이머 완료 스케줄 등록
-                    redisTTLSchedulerService.scheduleTimer(savedTimer);
-                    log.info("타이머 생성 및 스케줄 등록 완료: timerId={}", savedTimer.getId());
+                    // 타이머 스케줄 등록 이벤트 발행
+                    eventPublisher.publishEvent(new TimerScheduleEvent(this, TimerScheduleEvent.Type.SCHEDULE, savedTimer));
+                    log.info("타이머 생성 및 스케줄 등록 이벤트 발행 완료: timerId={}", savedTimer.getId());
                 })
                 .map(savedTimer -> {
                     // 남은 시간 계산 (음수가 되지 않도록 처리)
@@ -157,9 +160,9 @@ public class TimerService {
                     
                     return timerRepository.save(timer)
                             .doOnNext(updatedTimer -> {
-                    // 타이머 스케줄 업데이트
-                    redisTTLSchedulerService.updateTimerSchedule(updatedTimer);
-                                log.info("타이머 목표 시간 변경 및 스케줄 업데이트 완료: timerId={}", updatedTimer.getId());
+                                // 타이머 스케줄 업데이트 이벤트 발행
+                                eventPublisher.publishEvent(new TimerScheduleEvent(this, TimerScheduleEvent.Type.UPDATE, updatedTimer));
+                                log.info("타이머 목표 시간 변경 및 스케줄 업데이트 이벤트 발행 완료: timerId={}", updatedTimer.getId());
                             })
                             .flatMap(updatedTimer -> {
                                 // 이벤트 발행
@@ -438,9 +441,9 @@ public class TimerService {
                     
                     return timerRepository.save(timer)
                             .doOnNext(savedTimer -> {
-                    // 타이머 완료 시 스케줄 취소
-                    redisTTLSchedulerService.cancelTimerSchedule(savedTimer.getId());
-                                log.info("타이머 완료 및 스케줄 취소: timerId={}", savedTimer.getId());
+                                // 타이머 완료 시 스케줄 취소 이벤트 발행
+                                eventPublisher.publishEvent(new TimerScheduleEvent(this, TimerScheduleEvent.Type.CANCEL, savedTimer.getId()));
+                                log.info("타이머 완료 및 스케줄 취소 이벤트 발행: timerId={}", savedTimer.getId());
                             })
                             .flatMap(savedTimer -> {
                                 // 온라인 사용자 수 조회
@@ -465,5 +468,22 @@ public class TimerService {
                             });
                 })
                 .then();
+    }
+    
+    /**
+     * TTL 만료로 인한 타이머 완료 이벤트 리스너
+     * RedisTTLSchedulerService에서 발행하는 이벤트를 처리
+     */
+    @EventListener
+    public void handleTimerCompletionEvent(TimerCompletionEvent event) {
+        String timerId = event.getTimerId();
+        log.info("🔔 TTL 만료 타이머 완료 이벤트 수신: timerId={}", timerId);
+        
+        // 기존 publishTimerCompletedEvent 로직을 비동기로 실행
+        publishTimerCompletedEvent(timerId)
+                .doOnSuccess(v -> log.info("✅ TTL 만료 타이머 완료 처리 성공: timerId={}", timerId))
+                .doOnError(error -> log.error("❌ TTL 만료 타이머 완료 처리 실패: timerId={}, error={}", 
+                    timerId, error.getMessage(), error))
+                .subscribe(); // 비동기 실행
     }
 }

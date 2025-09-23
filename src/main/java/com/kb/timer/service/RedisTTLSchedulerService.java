@@ -2,11 +2,16 @@ package com.kb.timer.service;
 
 import com.kb.timer.model.entity.Timer;
 import com.kb.timer.model.entity.TimerCompletionLog;
+import com.kb.timer.model.event.TimerScheduleEvent;
+import com.kb.timer.model.event.TimerCompletionEvent;
 import com.kb.timer.repository.TimerCompletionLogRepository;
 import com.kb.timer.repository.TimerRepository;
 import com.kb.timer.util.ServerInstanceIdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
@@ -29,10 +34,10 @@ import java.time.Instant;
 public class RedisTTLSchedulerService extends KeyExpirationEventMessageListener {
 
     private final ReactiveRedisTemplate<String, String> stringRedisTemplate;
-    private final TimerService timerService;
     private final ServerInstanceIdGenerator serverInstanceIdGenerator;
     private final TimerCompletionLogRepository completionLogRepository;
     private final TimerRepository timerRepository;
+    private final ApplicationEventPublisher eventPublisher;
     
     // Redis 키 상수
     private static final String TIMER_SCHEDULE_PREFIX = "timer:schedule:";
@@ -40,16 +45,16 @@ public class RedisTTLSchedulerService extends KeyExpirationEventMessageListener 
     
     public RedisTTLSchedulerService(RedisMessageListenerContainer listenerContainer,
                                    ReactiveRedisTemplate<String, String> stringRedisTemplate,
-                                   TimerService timerService,
                                    ServerInstanceIdGenerator serverInstanceIdGenerator,
                                    TimerCompletionLogRepository completionLogRepository,
-                                   TimerRepository timerRepository) {
+                                   TimerRepository timerRepository,
+                                   ApplicationEventPublisher eventPublisher) {
         super(listenerContainer);
         this.stringRedisTemplate = stringRedisTemplate;
-        this.timerService = timerService;
         this.serverInstanceIdGenerator = serverInstanceIdGenerator;
         this.completionLogRepository = completionLogRepository;
         this.timerRepository = timerRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @PostConstruct
@@ -218,7 +223,10 @@ public class RedisTTLSchedulerService extends KeyExpirationEventMessageListener 
                     if (lockAcquired) {
                         log.info("✅ TTL 만료 타이머 처리 시작 (락 획득): timerId={}, serverId={}", timerId, serverId);
                         
-                        return timerService.publishTimerCompletedEvent(timerId)
+                        // 타이머 완료 이벤트 발행 (동일 서버 내 TimerService에서 처리)
+                        eventPublisher.publishEvent(new TimerCompletionEvent(this, timerId));
+                        log.info("✅ TTL 만료 타이머 완료 이벤트 발행: timerId={}", timerId);
+                        return Mono.<Void>empty()
                                 .doOnSuccess(v -> {
                                     // 성공 로그 업데이트
                                     completionLog.setProcessingCompletedAt(Instant.now());
@@ -296,7 +304,10 @@ public class RedisTTLSchedulerService extends KeyExpirationEventMessageListener 
                     if (lockAcquired) {
                         log.info("✅ TTL 만료 타이머 처리 시작 (락 획득): timerId={}, serverId={}", timerId, serverId);
                         
-                        return timerService.publishTimerCompletedEvent(timerId)
+                        // 타이머 완료 이벤트 발행 (동일 서버 내 TimerService에서 처리)
+                        eventPublisher.publishEvent(new TimerCompletionEvent(this, timerId));
+                        log.info("✅ TTL 만료 타이머 완료 이벤트 발행: timerId={}", timerId);
+                        return Mono.<Void>empty()
                                 .doOnSuccess(v -> log.info("✅ TTL 만료 타이머 완료 처리 성공: timerId={}", timerId))
                                 .doFinally(signalType -> {
                                     // 처리 완료 후 락 해제
@@ -333,6 +344,29 @@ public class RedisTTLSchedulerService extends KeyExpirationEventMessageListener 
         return stringRedisTemplate.keys(pattern)
                 .count()
                 .doOnNext(count -> log.debug("현재 TTL 스케줄된 타이머 수: {}", count));
+    }
+
+    /**
+     * 타이머 스케줄 이벤트 리스너
+     * TimerService에서 발행하는 스케줄 관련 이벤트를 처리
+     */
+    @EventListener
+    public void handleTimerScheduleEvent(TimerScheduleEvent event) {
+        switch (event.getType()) {
+            case SCHEDULE:
+                if (event.getTimer() != null) {
+                    scheduleTimer(event.getTimer());
+                }
+                break;
+            case UPDATE:
+                if (event.getTimer() != null) {
+                    updateTimerSchedule(event.getTimer());
+                }
+                break;
+            case CANCEL:
+                cancelTimerSchedule(event.getTimerId());
+                break;
+        }
     }
 
     /**
