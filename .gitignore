@@ -40,3 +40,23 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Node.js ###
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+### Frontend Build ###
+frontend/dist/
+frontend/build/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+### Logs ###
+logs
+*.log

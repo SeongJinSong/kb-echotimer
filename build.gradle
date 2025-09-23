@@ -51,3 +51,71 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+// 프론트엔드 빌드 태스크들
+task npmInstall(type: Exec) {
+    description = 'Install frontend dependencies'
+    group = 'frontend'
+    workingDir 'frontend'
+    
+    if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+        commandLine 'cmd', '/c', 'npm', 'install'
+    } else {
+        commandLine 'npm', 'install'
+    }
+    
+    inputs.file('frontend/package.json')
+    outputs.dir('frontend/node_modules')
+}
+
+task npmBuild(type: Exec, dependsOn: npmInstall) {
+    description = 'Build frontend application'
+    group = 'frontend'
+    workingDir 'frontend'
+    
+    if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+        commandLine 'cmd', '/c', 'npm', 'run', 'build'
+    } else {
+        commandLine 'npm', 'run', 'build'
+    }
+    
+    inputs.dir('frontend/src')
+    inputs.file('frontend/package.json')
+    inputs.file('frontend/vite.config.ts')
+    inputs.file('frontend/tsconfig.json')
+    outputs.dir('frontend/dist')
+}
+
+task copyFrontendResources(type: Copy, dependsOn: npmBuild) {
+    description = 'Copy frontend build to Spring Boot static resources'
+    group = 'frontend'
+    
+    from 'frontend/dist'
+    into 'src/main/resources/static'
+}
+
+task cleanFrontend(type: Delete) {
+    description = 'Clean frontend build artifacts'
+    group = 'frontend'
+    
+    delete 'frontend/dist'
+    delete 'frontend/node_modules'
+    delete 'src/main/resources/static'
+}
+
+// Spring Boot 빌드 시 프론트엔드도 함께 빌드
+processResources.dependsOn copyFrontendResources
+clean.dependsOn cleanFrontend
+
+// 개발용 태스크: 프론트엔드 개발 서버 실행
+task npmDev(type: Exec, dependsOn: npmInstall) {
+    description = 'Start frontend development server'
+    group = 'frontend'
+    workingDir 'frontend'
+    
+    if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+        commandLine 'cmd', '/c', 'npm', 'run', 'dev'
+    } else {
+        commandLine 'npm', 'run', 'dev'
+    }
+}
