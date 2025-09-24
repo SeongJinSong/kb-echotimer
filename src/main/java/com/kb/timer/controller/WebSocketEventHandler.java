@@ -1,8 +1,10 @@
 package com.kb.timer.controller;
 
+import com.kb.timer.model.dto.TimerResponse;
 import com.kb.timer.service.RedisConnectionManager;
 import com.kb.timer.service.TimerService;
 import com.kb.timer.util.ServerInstanceIdGenerator;
+import reactor.core.publisher.Mono;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -128,8 +130,34 @@ public class WebSocketEventHandler {
                 sessionTracker.put(sessionId, new SessionInfo(timerId, userId));
                 log.debug("세션 추적 정보 저장: sessionId={}, timerId={}, userId={}", sessionId, timerId, userId);
                 
-                redisConnectionManager.recordUserConnection(timerId, userId, serverId, sessionId)
-                    .then(timerService.publishUserJoinedEvent(timerId, userId))
+                // 타이머 정보 조회하여 공유 타이머 접속인지 확인
+                // timerId가 UUID 형식이면 실제 타이머 ID, 아니면 share token
+                Mono<TimerResponse> timerInfoMono;
+                if (isUUID(timerId)) {
+                    timerInfoMono = timerService.getTimerInfo(timerId, userId);
+                } else {
+                    timerInfoMono = timerService.getTimerInfoByShareToken(timerId, userId);
+                }
+                
+                timerInfoMono.flatMap(timerResponse -> {
+                        String actualTimerId = timerResponse.getTimerId();
+                        
+                        // 소유자가 아닌 사용자가 접속한 경우 (공유 타이머 접속)
+                        if (!timerResponse.getOwnerId().equals(userId)) {
+                            log.info("🔗 공유 타이머 접속 감지: timerId={}, actualTimerId={}, accessedUserId={}, ownerId={}", 
+                                    timerId, actualTimerId, userId, timerResponse.getOwnerId());
+                            log.info("🔔 공유 타이머 접속 이벤트 발행 시작: actualTimerId={}", actualTimerId);
+                            
+                            // 공유 타이머 접속 이벤트 발행 (소유자에게 알림) - 실제 타이머 ID 사용
+                            return timerService.publishSharedTimerAccessedEvent(actualTimerId, userId, timerResponse.getOwnerId())
+                                    .then(redisConnectionManager.recordUserConnection(actualTimerId, userId, serverId, sessionId))
+                                    .then(timerService.publishUserJoinedEvent(actualTimerId, userId));
+                        } else {
+                            // 소유자 본인 접속
+                            return redisConnectionManager.recordUserConnection(actualTimerId, userId, serverId, sessionId)
+                                    .then(timerService.publishUserJoinedEvent(actualTimerId, userId));
+                        }
+                    })
                     .doOnSuccess(ignored -> log.info("타이머 구독 완료: timerId={}, userId={}", timerId, userId))
                     .doOnError(error -> log.error("타이머 구독 실패: timerId={}, userId={}, error={}", 
                               timerId, userId, error.getMessage(), error))
@@ -184,5 +212,19 @@ public class WebSocketEventHandler {
         // 헤더에 없으면 세션 ID 기반으로 생성 (fallback)
         String sessionId = headerAccessor.getSessionId();
         return "user-" + sessionId.substring(0, 8);
+    }
+    
+    /**
+     * UUID 형식인지 확인
+     * @param str 확인할 문자열
+     * @return UUID 형식 여부
+     */
+    private boolean isUUID(String str) {
+        try {
+            java.util.UUID.fromString(str);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 }

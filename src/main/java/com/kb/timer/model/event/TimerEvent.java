@@ -20,7 +20,8 @@ import java.util.UUID;
     @JsonSubTypes.Type(value = TimestampSavedEvent.class, name = "TIMESTAMP_SAVED"),
     @JsonSubTypes.Type(value = UserJoinedEvent.class, name = "USER_JOINED"),
     @JsonSubTypes.Type(value = UserLeftEvent.class, name = "USER_LEFT"),
-    @JsonSubTypes.Type(value = TimerCompletedEvent.class, name = "TIMER_COMPLETED")
+    @JsonSubTypes.Type(value = TimerCompletedEvent.class, name = "TIMER_COMPLETED"),
+    @JsonSubTypes.Type(value = SharedTimerAccessedEvent.class, name = "SHARED_TIMER_ACCESSED")
 })
 @Data
 @SuperBuilder

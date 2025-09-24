@@ -2,6 +2,7 @@ package com.kb.timer.service;
 
 import com.kb.timer.model.entity.TimerEventLog;
 import com.kb.timer.model.event.TimerEvent;
+import com.kb.timer.model.event.SharedTimerAccessedEvent;
 import com.kb.timer.repository.TimerEventLogRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -97,6 +98,17 @@ public class KafkaEventConsumer {
      * @return 처리 결과
      */
     private Mono<Void> processEvent(TimerEvent event) {
+        // 특정 이벤트는 항상 처리 (필터링 제외)
+        if (shouldAlwaysProcess(event)) {
+            log.info("중요 이벤트 처리 시작: {} - {}", event.getEventType(), event.getTimerId());
+            return Mono.when(
+                // 1. 이벤트 로그 저장
+                saveEventLog(event),
+                // 2. WebSocket으로 브로드캐스트
+                broadcastToWebSocket(event)
+            );
+        }
+        
         return connectionManager.isServerRelevantForTimer(event.getTimerId(), serverId)
             .flatMap(isRelevant -> {
                 if (!isRelevant) {
@@ -152,12 +164,33 @@ public class KafkaEventConsumer {
      */
     private Mono<Void> broadcastToWebSocket(TimerEvent event) {
         return Mono.fromRunnable(() -> {
+            // 모든 이벤트는 타이머 토픽으로 브로드캐스트
+            // 프론트엔드에서 필터링하여 적절한 사용자에게만 표시
             String destination = "/topic/timer/" + event.getTimerId();
             messagingTemplate.convertAndSend(destination, event);
-            log.debug("WebSocket 브로드캐스트 완료: {} -> {}", event.getEventType(), destination);
+            
+            if (event instanceof SharedTimerAccessedEvent) {
+                SharedTimerAccessedEvent accessEvent = (SharedTimerAccessedEvent) event;
+                log.info("🔔 공유 타이머 접속 이벤트 브로드캐스트: ownerId={}, accessedUserId={}", 
+                        accessEvent.getOwnerId(), accessEvent.getAccessedUserId());
+            } else {
+                log.debug("WebSocket 브로드캐스트 완료: {} -> {}", event.getEventType(), destination);
+            }
         });
     }
     
+    /**
+     * 항상 처리해야 하는 이벤트인지 확인
+     * @param event 이벤트
+     * @return 항상 처리 여부
+     */
+    private boolean shouldAlwaysProcess(TimerEvent event) {
+        // 모든 사용자에게 전달되어야 하는 중요한 이벤트들
+        return "TARGET_TIME_CHANGED".equals(event.getEventType()) ||
+               "TIMER_COMPLETED".equals(event.getEventType()) ||
+               "SHARED_TIMER_ACCESSED".equals(event.getEventType());
+    }
+
     /**
      * 이벤트에서 사용자 ID 추출
      * @param event 이벤트

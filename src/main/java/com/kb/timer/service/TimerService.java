@@ -88,6 +88,7 @@ public class TimerService {
                             .onlineUserCount(0) // 새로 생성된 타이머는 아직 접속자 없음
                             .shareToken(generateShareUrl(savedTimer.getShareToken()))
                             .userRole("OWNER")
+                            .createdAt(savedTimer.getCreatedAt()) // 생성 시각 추가
                             .build();
                 });
     }
@@ -485,5 +486,34 @@ public class TimerService {
                 .doOnError(error -> log.error("❌ TTL 만료 타이머 완료 처리 실패: timerId={}, error={}", 
                     timerId, error.getMessage(), error))
                 .subscribe(); // 비동기 실행
+    }
+
+    /**
+     * 공유 타이머 접속 이벤트 발행 (소유자에게만 알림)
+     * @param timerId 타이머 ID
+     * @param accessedUserId 접속한 사용자 ID
+     * @param ownerId 타이머 소유자 ID
+     * @return 발행 결과
+     */
+    public Mono<Void> publishSharedTimerAccessedEvent(String timerId, String accessedUserId, String ownerId) {
+        log.info("🔗 공유 타이머 접속 이벤트 발행: timerId={}, accessedUserId={}, ownerId={}", 
+                timerId, accessedUserId, ownerId);
+        
+        SharedTimerAccessedEvent event = SharedTimerAccessedEvent.builder()
+                .timerId(timerId)
+                .accessedUserId(accessedUserId)
+                .ownerId(ownerId)
+                .originServerId(serverId)
+                .build();
+        
+        return kafkaEventPublisher.publishEvent(event)
+                .doOnSuccess(v -> {
+                    log.info("✅ 공유 타이머 접속 이벤트 발행 완료: timerId={}", timerId);
+                    log.info("📤 Kafka 이벤트 발행됨: SHARED_TIMER_ACCESSED - timerId={}, accessedUserId={}, ownerId={}", 
+                            timerId, accessedUserId, ownerId);
+                })
+                .doOnError(error -> log.error("❌ 공유 타이머 접속 이벤트 발행 실패: timerId={}, error={}", 
+                        timerId, error.getMessage(), error))
+                .then();
     }
 }
