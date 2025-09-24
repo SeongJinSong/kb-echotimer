@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { TimerResponse, AnyTimerEvent, CreateTimerRequest } from '../types/timer';
 import { TimerApiService } from '../services/api';
 import { webSocketService } from '../services/websocket';
@@ -13,6 +13,8 @@ export interface UseTimerOptions {
   userId: string;
   autoConnect?: boolean; // WebSocket 자동 연결 여부
   isShareToken?: boolean; // 공유 토큰 여부
+  onTimerCompleted?: () => void; // 타이머 완료 콜백 추가
+  onSharedTimerAccessed?: (accessedUserId: string) => void; // 공유 타이머 접속 콜백 추가
 }
 
 export interface UseTimerReturn {
@@ -40,7 +42,7 @@ export interface UseTimerReturn {
 }
 
 export function useTimer(options: UseTimerOptions): UseTimerReturn {
-  const { timerId: initialTimerId, userId, autoConnect = true, isShareToken = false } = options;
+  const { timerId: initialTimerId, userId, autoConnect = true, isShareToken = false, onTimerCompleted, onSharedTimerAccessed } = options;
   
   // 상태 관리
   const [timer, setTimer] = useState<TimerResponse | null>(null);
@@ -222,8 +224,12 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
     switch (event.eventType) {
       case 'TARGET_TIME_CHANGED':
         // 목표 시간이 변경되었을 때 타이머 정보 새로고침
+        console.log('🔄 목표 시간 변경 이벤트 수신:', event);
         if (currentTimerIdRef.current) {
+          console.log('🔄 타이머 정보 새로고침 시작:', currentTimerIdRef.current);
           loadTimer(currentTimerIdRef.current);
+        } else {
+          console.log('❌ currentTimerIdRef.current가 없음');
         }
         break;
         
@@ -249,6 +255,11 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
           const updatedTimer = { ...timerRef.current, completed: true };
           setTimer(updatedTimer);
           timerRef.current = updatedTimer;
+          
+          // 완료 콜백 호출 (알림 표시 등)
+          if (onTimerCompleted) {
+            onTimerCompleted();
+          }
         }
         break;
         
@@ -275,8 +286,31 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
           console.log('❌ 타이머 상태 업데이트 실패 - timerRef.current:', timerRef.current, 'onlineUserCount:', countEvent.onlineUserCount);
         }
         break;
+        
+      case 'SHARED_TIMER_ACCESSED':
+        // 공유 타이머 접속 이벤트 (소유자에게만 알림 표시)
+        const accessEvent = event as import('../types/timer').SharedTimerAccessedEvent;
+        console.log('🔗 공유 타이머 접속 이벤트 수신:', accessEvent);
+        console.log('📊 현재 타이머 상태:', timerRef.current);
+        console.log('👤 현재 사용자 ID:', userId);
+        console.log('👑 타이머 소유자 ID:', timerRef.current?.ownerId);
+        
+        // 현재 사용자가 소유자인 경우에만 알림 표시
+        if (timerRef.current && timerRef.current.ownerId === userId) {
+          console.log('🔔 소유자에게 공유 타이머 접속 알림 표시:', accessEvent.accessedUserId);
+          // 알림 콜백 호출 (App.tsx에서 전달받은 콜백)
+          if (onSharedTimerAccessed) {
+            console.log('📞 알림 콜백 호출 중...');
+            onSharedTimerAccessed(accessEvent.accessedUserId);
+          } else {
+            console.log('❌ 알림 콜백이 없음');
+          }
+        } else {
+          console.log('👤 소유자가 아니므로 알림 표시하지 않음 - 현재사용자:', userId, '소유자:', timerRef.current?.ownerId);
+        }
+        break;
     }
-  }, [loadTimer]); // timer 의존성 제거
+  }, [loadTimer, onTimerCompleted, onSharedTimerAccessed, userId]); // 의존성 추가
 
   /**
    * 남은 시간 계산 (1초마다 업데이트)
@@ -299,6 +333,12 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
       // 타이머가 완료되었을 때 (한 번만 실행)
       if (remaining === 0 && !timer.completed && !hasCompletedOnce) {
         hasCompletedOnce = true;
+        
+        // 완료 콜백 호출 (알림 표시 등)
+        if (onTimerCompleted) {
+          onTimerCompleted();
+        }
+        
         completeTimer();
       }
     };
@@ -314,7 +354,7 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
         clearInterval(intervalRef.current);
       }
     };
-  }, [timer, completeTimer]);
+  }, [timer, completeTimer, onTimerCompleted]);
 
   /**
    * WebSocket 연결 상태 관리
@@ -366,8 +406,29 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
 
   // 계산된 값들
   const isCompleted = timer?.completed || remainingSeconds === 0;
-  const progress = timer ? 
-    Math.max(0, Math.min(100, ((timer.remainingTime - remainingSeconds) / timer.remainingTime) * 100)) : 0;
+  
+  // 진행률 계산 (남은 시간 기준으로 단순화)
+  const progress = useMemo(() => {
+    if (!timer || !timer.targetTime || isCompleted) return 100;
+    
+    const now = new Date().getTime();
+    const target = new Date(timer.targetTime).getTime();
+    const serverTime = new Date(timer.serverTime).getTime();
+    
+    // 서버 시간을 기준으로 한 남은 시간 (밀리초)
+    const serverRemainingMs = target - serverTime;
+    // 현재 시간을 기준으로 한 남은 시간 (밀리초)  
+    const currentRemainingMs = target - now;
+    
+    if (serverRemainingMs <= 0) return 100; // 이미 완료
+    
+    // 진행률 = (서버 기준 남은 시간 - 현재 기준 남은 시간) / 서버 기준 남은 시간 * 100
+    const progressPercent = Math.max(0, Math.min(100, 
+      ((serverRemainingMs - currentRemainingMs) / serverRemainingMs) * 100
+    ));
+    
+    return progressPercent;
+  }, [timer, remainingSeconds, isCompleted]); // remainingSeconds를 의존성에 추가하여 실시간 업데이트
 
   return {
     // 상태

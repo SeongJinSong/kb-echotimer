@@ -14,7 +14,8 @@ import {
   Stop,
   Save,
   Share,
-  People
+  People,
+  Edit
 } from '@mui/icons-material';
 
 /**
@@ -40,6 +41,7 @@ interface TimerDisplayProps {
   onSave?: () => void;
   onShare?: () => void;
   onComplete?: () => void;
+  onEditTargetTime?: () => void;
 }
 
 export const TimerDisplay: React.FC<TimerDisplayProps> = ({
@@ -51,7 +53,8 @@ export const TimerDisplay: React.FC<TimerDisplayProps> = ({
   timerId,
   onSave,
   onShare,
-  onComplete
+  onComplete,
+  onEditTargetTime
 }) => {
   
   /**
@@ -64,12 +67,13 @@ export const TimerDisplay: React.FC<TimerDisplayProps> = ({
   };
 
   /**
-   * 진행률에 따른 색상 결정
+   * 남은 시간에 따른 색상 결정
    */
   const getProgressColor = (): 'primary' | 'warning' | 'error' => {
-    if (progress < 50) return 'primary';
-    if (progress < 80) return 'warning';
-    return 'error';
+    if (isCompleted) return 'primary'; // 완료된 경우 파란색
+    if (remainingSeconds > 300) return 'primary'; // 5분 이상 남은 경우 파란색
+    if (remainingSeconds > 60) return 'warning'; // 1분 이상 남은 경우 주황색
+    return 'error'; // 1분 미만 남은 경우 빨간색
   };
 
   /**
@@ -196,6 +200,25 @@ export const TimerDisplay: React.FC<TimerDisplayProps> = ({
                 }}
               >
                 <Stop />
+              </IconButton>
+            </Tooltip>
+          )}
+
+          {/* 기준 시각 수정 (Owner만, 완료되지 않았을 때만) */}
+          {userRole === 'OWNER' && !isCompleted && onEditTargetTime && (
+            <Tooltip title="기준 시각 수정">
+              <IconButton
+                onClick={() => {
+                  console.log('🔧 기준 시각 수정 버튼 클릭 - userRole:', userRole, 'isCompleted:', isCompleted);
+                  onEditTargetTime();
+                }}
+                sx={{ 
+                  backgroundColor: 'rgba(255,255,255,0.1)',
+                  color: 'white',
+                  '&:hover': { backgroundColor: 'rgba(255,255,255,0.2)' }
+                }}
+              >
+                <Edit />
               </IconButton>
             </Tooltip>
           )}

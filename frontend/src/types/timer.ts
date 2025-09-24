@@ -15,6 +15,7 @@ export interface TimerResponse {
   onlineUsers?: string[];
   shareToken?: string;
   userRole: 'OWNER' | 'VIEWER';
+  createdAt?: string; // ISO 8601 형식 - 타이머 생성 시각
   savedAt?: string; // ISO 8601 형식
   metadata?: Record<string, any>;
 }
@@ -95,10 +96,17 @@ export interface OnlineUserCountUpdatedEvent extends TimerEvent {
   onlineUserCount: number;
 }
 
+export interface SharedTimerAccessedEvent extends TimerEvent {
+  eventType: 'SHARED_TIMER_ACCESSED';
+  accessedUserId: string;
+  ownerId: string;
+}
+
 export type AnyTimerEvent = 
   | TargetTimeChangedEvent 
   | TimestampSavedEvent 
   | UserJoinedEvent 
   | UserLeftEvent 
   | TimerCompletedEvent
-  | OnlineUserCountUpdatedEvent;
+  | OnlineUserCountUpdatedEvent
+  | SharedTimerAccessedEvent;

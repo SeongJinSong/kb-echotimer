@@ -1,11 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   ThemeProvider,
   createTheme,
   CssBaseline,
   Container,
-  AppBar,
-  Toolbar,
   Typography,
   Box,
   Fab,
@@ -71,6 +69,16 @@ function App() {
   const [timestampRefreshTrigger, setTimestampRefreshTrigger] = useState(0);
   const [showTargetTimeDialog, setShowTargetTimeDialog] = useState(false);
   const [newTargetTime, setNewTargetTime] = useState('');
+  // 공유 타이머 여부는 이제 WebSocket 이벤트로 처리됨
+
+  // 브라우저 알림 권한 요청
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        console.log('알림 권한:', permission);
+      });
+    }
+  }, []);
 
   // URL에서 타이머 ID 추출 (공유 링크 지원)
   useEffect(() => {
@@ -94,6 +102,36 @@ function App() {
     }
   }, []);
 
+  /**
+   * 타이머 완료 알림 핸들러
+   */
+  const handleTimerCompleted = useCallback(() => {
+    showSnackbar('🎉 타이머가 완료되었습니다!', 'success');
+    
+    // 브라우저 알림 (권한이 있는 경우)
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('KB EchoTimer', {
+        body: '타이머가 완료되었습니다! 🎉',
+        icon: '/favicon.ico'
+      });
+    }
+  }, []);
+
+  /**
+   * 공유 타이머 접속 알림 핸들러 (소유자에게만 표시)
+   */
+  const handleSharedTimerAccessed = useCallback((accessedUserId: string) => {
+    showSnackbar(`${accessedUserId}님이 공유 타이머에 접속했습니다! 👋`, 'info');
+    
+    // 브라우저 알림 (권한이 있는 경우)
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('KB EchoTimer', {
+        body: `${accessedUserId}님이 공유 타이머에 접속했습니다!`,
+        icon: '/favicon.ico'
+      });
+    }
+  }, []);
+
   // 타이머 훅 사용
   const {
     timer,
@@ -111,8 +149,12 @@ function App() {
     timerId: currentTimerId || undefined,
     userId,
     autoConnect: true,
-    isShareToken: !!(currentTimerId && window.location.pathname.startsWith('/timer/')) // 공유 토큰 여부 명시
+    isShareToken: !!(currentTimerId && window.location.pathname.startsWith('/timer/')), // 공유 토큰 여부 명시
+    onTimerCompleted: handleTimerCompleted, // 타이머 완료 콜백 추가
+    onSharedTimerAccessed: handleSharedTimerAccessed // 공유 타이머 접속 콜백 추가
   });
+
+  // 공유 타이머 접속 알림은 이제 WebSocket 이벤트로 처리됨 (소유자에게만 표시)
 
   /**
    * 스낵바 표시 헬퍼
@@ -268,29 +310,23 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       
-      {/* 앱바 */}
-      <AppBar position="static" elevation={0}>
-        <Toolbar>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+      {/* 메인 컨텐츠 */}
+      <Container maxWidth="md" sx={{ py: 4 }}>
+        {/* 헤더 영역 */}
+        <Box textAlign="center" mb={4}>
+          <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 'bold' }}>
             🕐 KB EchoTimer
           </Typography>
           
           {/* 연결 상태 표시 */}
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Chip
-              icon={connected ? <Wifi /> : <WifiOff />}
-              label={connected ? '연결됨' : '연결 안됨'}
-              color={connected ? 'success' : 'error'}
-              size="small"
-              variant="outlined"
-              sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.5)' }}
-            />
-          </Stack>
-        </Toolbar>
-      </AppBar>
-
-      {/* 메인 컨텐츠 */}
-      <Container maxWidth="md" sx={{ py: 4 }}>
+          <Chip
+            icon={connected ? <Wifi /> : <WifiOff />}
+            label={connected ? '연결됨' : '연결 안됨'}
+            color={connected ? 'success' : 'error'}
+            size="small"
+            variant="outlined"
+          />
+        </Box>
         {showCreator ? (
           /* 타이머 생성 화면 */
           <TimerCreator
@@ -311,6 +347,7 @@ function App() {
               onSave={handleSaveTimestamp}
               onShare={handleShare}
               onComplete={handleCompleteTimer}
+              onEditTargetTime={handleOpenTargetTimeDialog}
             />
             
             {/* 타이머 정보 */}
@@ -324,22 +361,9 @@ function App() {
                 </Typography>
               </Stack>
               
-              <Stack direction="row" alignItems="center" justifyContent="center" spacing={1} mt={1}>
-                <Typography variant="body2" color="text.secondary">
-                  목표 시간: {new Date(timer.targetTime).toLocaleString('ko-KR')}
-                </Typography>
-                {/* 소유자만 기준 시각 수정 가능하고, 타이머가 완료되지 않았을 때만 */}
-                {timer.userRole === 'OWNER' && !isCompleted && (
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={handleOpenTargetTimeDialog}
-                    sx={{ ml: 1 }}
-                  >
-                    수정
-                  </Button>
-                )}
-              </Stack>
+              <Typography variant="body2" color="text.secondary" mt={1}>
+                목표 시간: {new Date(timer.targetTime).toLocaleString('ko-KR')}
+              </Typography>
             </Box>
             
             {/* 타임스탬프 목록 */}
