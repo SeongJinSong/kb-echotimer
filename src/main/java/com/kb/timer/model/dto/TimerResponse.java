@@ -72,6 +72,11 @@ public class TimerResponse {
     private String userRole;
     
     /**
+     * 타이머 생성 시각
+     */
+    private Instant createdAt;
+    
+    /**
      * 저장된 시각
      */
     private Instant savedAt;
