@@ -54,9 +54,25 @@ const theme = createTheme({
 
 function App() {
   // 상태 관리
-  const [showCreator, setShowCreator] = useState(true);
-  const [userId] = useState(() => `user-${Date.now()}`); // 임시 사용자 ID 생성
-  const [currentTimerId, setCurrentTimerId] = useState<string | null>(null);
+  const [showCreator, setShowCreator] = useState(() => {
+    // sessionStorage에서 기존 타이머 ID가 있으면 Creator를 숨김
+    const existingTimerId = sessionStorage.getItem('kb-echotimer-current-timer-id');
+    return !existingTimerId;
+  });
+  const [userId] = useState(() => {
+    // sessionStorage에서 기존 사용자 ID 확인, 없으면 새로 생성
+    const existingUserId = sessionStorage.getItem('kb-echotimer-user-id');
+    if (existingUserId) {
+      return existingUserId;
+    }
+    const newUserId = `user-${Date.now()}`;
+    sessionStorage.setItem('kb-echotimer-user-id', newUserId);
+    return newUserId;
+  });
+  const [currentTimerId, setCurrentTimerId] = useState<string | null>(() => {
+    // sessionStorage에서 기존 타이머 ID 확인
+    return sessionStorage.getItem('kb-echotimer-current-timer-id');
+  });
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
     message: string;
@@ -90,6 +106,7 @@ function App() {
     if (timerMatch) {
       const shareToken = timerMatch[1];
       setCurrentTimerId(shareToken);
+      sessionStorage.setItem('kb-echotimer-current-timer-id', shareToken);
       setShowCreator(false);
       return;
     }
@@ -98,6 +115,7 @@ function App() {
     const timerIdFromUrl = urlParams.get('timer');
     if (timerIdFromUrl) {
       setCurrentTimerId(timerIdFromUrl);
+      sessionStorage.setItem('kb-echotimer-current-timer-id', timerIdFromUrl);
       setShowCreator(false);
     }
   }, []);
@@ -171,15 +189,19 @@ function App() {
    */
   const handleCreateTimer = async (targetTimeSeconds: number) => {
     try {
-      await createTimer(targetTimeSeconds);
+      const newTimer = await createTimer(targetTimeSeconds);
+      setCurrentTimerId(newTimer.timerId);
+      sessionStorage.setItem('kb-echotimer-current-timer-id', newTimer.timerId);
       setShowCreator(false);
       showSnackbar('타이머가 생성되었습니다!', 'success');
       
       // URL 업데이트 (공유 가능하도록)
-      if (timer?.shareToken) {
-        const token = timer.shareToken.replace('/timer/', '');
+      if (newTimer?.shareToken) {
+        const token = newTimer.shareToken.replace('/timer/', '');
         const newUrl = `${window.location.origin}/timer/${token}`;
         window.history.pushState({}, '', newUrl);
+        // URL이 변경되면 sessionStorage도 업데이트
+        sessionStorage.setItem('kb-echotimer-current-timer-id', token);
       }
     } catch (err) {
       showSnackbar('타이머 생성에 실패했습니다.', 'error');

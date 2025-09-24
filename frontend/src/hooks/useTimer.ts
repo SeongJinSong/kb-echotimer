@@ -25,7 +25,7 @@ export interface UseTimerReturn {
   connected: boolean; // WebSocket 연결 상태
   
   // 타이머 액션
-  createTimer: (targetTimeSeconds: number) => Promise<void>;
+  createTimer: (targetTimeSeconds: number) => Promise<TimerResponse>;
   loadTimer: (timerId: string) => Promise<void>;
   saveTimestamp: () => Promise<void>;
   changeTargetTime: (newTargetTime: Date) => Promise<void>;
@@ -92,8 +92,10 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
       }
       
       console.log('✅ 타이머 생성 완료:', newTimer.timerId);
+      return newTimer; // 생성된 타이머 반환
     } catch (err) {
       handleError(err, '타이머 생성');
+      throw err; // 에러를 다시 던져서 상위에서 처리할 수 있도록
     } finally {
       setLoading(false);
     }

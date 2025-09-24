@@ -1,8 +1,6 @@
 package com.kb.timer.controller;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -28,7 +26,7 @@ public class GlobalExceptionHandler {
      * @return 에러 응답
      */
     @ExceptionHandler(WebExchangeBindException.class)
-    public Mono<ResponseEntity<Map<String, Object>>> handleValidationException(WebExchangeBindException ex) {
+    public Mono<Map<String, Object>> handleValidationException(WebExchangeBindException ex) {
         log.warn("유효성 검증 실패: {}", ex.getMessage());
         
         Map<String, String> fieldErrors = new HashMap<>();
@@ -45,7 +43,7 @@ public class GlobalExceptionHandler {
                 "timestamp", Instant.now().toString()
         );
         
-        return Mono.just(ResponseEntity.badRequest().body(errorResponse));
+        return Mono.just(errorResponse);
     }
 
     /**
@@ -55,7 +53,7 @@ public class GlobalExceptionHandler {
      * @return 에러 응답
      */
     @ExceptionHandler(RuntimeException.class)
-    public Mono<ResponseEntity<Map<String, Object>>> handleRuntimeException(RuntimeException ex) {
+    public Mono<Map<String, Object>> handleRuntimeException(RuntimeException ex) {
         log.error("런타임 예외 발생: {}", ex.getMessage(), ex);
         
         Map<String, Object> errorResponse = Map.of(
@@ -65,7 +63,7 @@ public class GlobalExceptionHandler {
                 "timestamp", Instant.now().toString()
         );
         
-        return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
+        return Mono.just(errorResponse);
     }
 
     /**
@@ -75,7 +73,7 @@ public class GlobalExceptionHandler {
      * @return 에러 응답
      */
     @ExceptionHandler(IllegalArgumentException.class)
-    public Mono<ResponseEntity<Map<String, Object>>> handleIllegalArgumentException(IllegalArgumentException ex) {
+    public Mono<Map<String, Object>> handleIllegalArgumentException(IllegalArgumentException ex) {
         log.warn("잘못된 인수: {}", ex.getMessage());
         
         Map<String, Object> errorResponse = Map.of(
@@ -85,7 +83,7 @@ public class GlobalExceptionHandler {
                 "timestamp", Instant.now().toString()
         );
         
-        return Mono.just(ResponseEntity.badRequest().body(errorResponse));
+        return Mono.just(errorResponse);
     }
 
     /**
@@ -95,7 +93,7 @@ public class GlobalExceptionHandler {
      * @return 에러 응답
      */
     @ExceptionHandler(Exception.class)
-    public Mono<ResponseEntity<Map<String, Object>>> handleGenericException(Exception ex) {
+    public Mono<Map<String, Object>> handleGenericException(Exception ex) {
         log.error("예상치 못한 예외 발생: {}", ex.getMessage(), ex);
         
         Map<String, Object> errorResponse = Map.of(
@@ -104,6 +102,6 @@ public class GlobalExceptionHandler {
                 "timestamp", Instant.now().toString()
         );
         
-        return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse));
+        return Mono.just(errorResponse);
     }
 }

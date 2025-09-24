@@ -33,14 +33,13 @@ public class TimerRestController {
      * @return 생성된 타이머 정보
      */
     @PostMapping
-    public Mono<ResponseEntity<TimerResponse>> createTimer(@Valid @RequestBody CreateTimerRequest request) {
+    public Mono<TimerResponse> createTimer(@Valid @RequestBody CreateTimerRequest request) {
         log.info("REST API - 타이머 생성 요청: targetTime={}초, ownerId={}", 
                 request.getTargetTimeSeconds(), request.getOwnerId());
         
         return timerService.createTimer(request.getTargetTimeSeconds(), request.getOwnerId())
-                .map(ResponseEntity::ok)
-                .doOnSuccess(response -> log.info("REST API - 타이머 생성 완료: {}", 
-                        response.getBody().getTimerId()))
+                .doOnNext(timerResponse -> log.info("REST API - 타이머 생성 완료: timerId={}", 
+                        timerResponse.getTimerId()))
                 .doOnError(error -> log.error("REST API - 타이머 생성 실패: {}", error.getMessage(), error));
     }
 
@@ -52,15 +51,14 @@ public class TimerRestController {
      * @return 타이머 정보
      */
     @GetMapping("/{timerId}")
-    public Mono<ResponseEntity<TimerResponse>> getTimer(
+    public Mono<TimerResponse> getTimer(
             @PathVariable String timerId,
             @RequestParam(required = false, defaultValue = "anonymous") String userId) {
         
         log.info("REST API - 타이머 정보 조회: timerId={}, userId={}", timerId, userId);
         
         return timerService.getTimerInfo(timerId, userId)
-                .map(ResponseEntity::ok)
-                .doOnSuccess(response -> log.info("REST API - 타이머 정보 조회 완료: {}", timerId))
+                .doOnNext(timerResponse -> log.info("REST API - 타이머 정보 조회 완료: timerId={}", timerId))
                 .doOnError(error -> log.error("REST API - 타이머 정보 조회 실패: timerId={}, error={}", 
                         timerId, error.getMessage(), error));
     }
@@ -73,15 +71,15 @@ public class TimerRestController {
      * @return 타이머 정보
      */
     @GetMapping("/shared/{shareToken}")
-    public Mono<ResponseEntity<TimerResponse>> getTimerByShareToken(
+    public Mono<TimerResponse> getTimerByShareToken(
             @PathVariable String shareToken,
             @RequestParam(required = false, defaultValue = "anonymous") String userId) {
 
         log.info("REST API - 공유 타이머 정보 조회 요청: shareToken={}, userId={}", shareToken, userId);
 
         return timerService.getTimerInfoByShareToken(shareToken, userId)
-                .map(ResponseEntity::ok)
-                .doOnSuccess(response -> log.info("REST API - 공유 타이머 정보 조회 완료: {}", shareToken))
+                .doOnNext(timerResponse -> log.info("REST API - 공유 타이머 정보 조회 완료: shareToken={}, timerId={}", 
+                        shareToken, timerResponse.getTimerId()))
                 .doOnError(error -> log.error("REST API - 공유 타이머 정보 조회 실패: shareToken={}, error={}",
                         shareToken, error.getMessage(), error));
     }
@@ -94,7 +92,7 @@ public class TimerRestController {
      * @return 업데이트된 타이머 정보
      */
     @PutMapping("/{timerId}/target-time")
-    public Mono<ResponseEntity<TimerResponse>> changeTargetTime(
+    public Mono<TimerResponse> changeTargetTime(
             @PathVariable String timerId,
             @Valid @RequestBody ChangeTargetTimeRequest request) {
         
@@ -102,8 +100,7 @@ public class TimerRestController {
                 timerId, request.getNewTargetTime(), request.getChangedBy());
         
         return timerService.changeTargetTime(timerId, request.getNewTargetTime(), request.getChangedBy())
-                .map(ResponseEntity::ok)
-                .doOnSuccess(response -> log.info("REST API - 목표 시간 변경 완료: timerId={}", timerId))
+                .doOnNext(timerResponse -> log.info("REST API - 목표 시간 변경 완료: timerId={}", timerId))
                 .doOnError(error -> log.error("REST API - 목표 시간 변경 실패: timerId={}, error={}", 
                         timerId, error.getMessage(), error));
     }
@@ -116,7 +113,7 @@ public class TimerRestController {
      * @return 저장된 타임스탬프 엔트리
      */
     @PostMapping("/{timerId}/timestamps")
-    public Mono<ResponseEntity<TimestampEntry>> saveTimestamp(
+    public Mono<TimestampEntry> saveTimestamp(
             @PathVariable String timerId,
             @Valid @RequestBody SaveTimestampRequest request) {
         
@@ -124,8 +121,7 @@ public class TimerRestController {
                 timerId, request.getUserId(), request.getTargetTime());
         
         return timerService.saveTimestamp(timerId, request.getUserId(), request.getTargetTime(), request.getMetadata())
-                .map(ResponseEntity::ok)
-                .doOnSuccess(response -> log.info("REST API - 타임스탬프 저장 완료: timerId={}, userId={}", 
+                .doOnNext(timestampEntry -> log.info("REST API - 타임스탬프 저장 완료: timerId={}, userId={}", 
                         timerId, request.getUserId()))
                 .doOnError(error -> log.error("REST API - 타임스탬프 저장 실패: timerId={}, userId={}, error={}", 
                         timerId, request.getUserId(), error.getMessage(), error));
@@ -173,12 +169,12 @@ public class TimerRestController {
      * @return 완료 처리 결과
      */
     @PostMapping("/{timerId}/complete")
-    public Mono<ResponseEntity<String>> completeTimer(@PathVariable String timerId) {
+    public Mono<String> completeTimer(@PathVariable String timerId) {
         log.info("REST API - 타이머 완료 요청: timerId={}", timerId);
         
         return timerService.publishTimerCompletedEvent(timerId)
-                .then(Mono.just(ResponseEntity.ok("Timer completed successfully")))
-                .doOnSuccess(response -> log.info("REST API - 타이머 완료 처리 완료: timerId={}", timerId))
+                .then(Mono.just("Timer completed successfully"))
+                .doOnNext(response -> log.info("REST API - 타이머 완료 처리 완료: timerId={}", timerId))
                 .doOnError(error -> log.error("REST API - 타이머 완료 처리 실패: timerId={}, error={}", 
                         timerId, error.getMessage(), error));
     }
@@ -189,11 +185,11 @@ public class TimerRestController {
      * @return 서비스 상태
      */
     @GetMapping("/health")
-    public Mono<ResponseEntity<Map<String, String>>> health() {
-        return Mono.just(ResponseEntity.ok(Map.of(
+    public Mono<Map<String, String>> health() {
+        return Mono.just(Map.of(
                 "status", "UP",
                 "service", "kb-timer-service",
                 "timestamp", Instant.now().toString()
-        )));
+        ));
     }
 }

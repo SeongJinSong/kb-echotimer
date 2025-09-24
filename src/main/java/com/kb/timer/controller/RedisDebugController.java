@@ -30,12 +30,20 @@ public class RedisDebugController {
      * 모든 Redis 키 조회
      */
     @GetMapping("/keys")
-    public Flux<String> getAllKeys(@RequestParam(defaultValue = "*") String pattern) {
-        log.info("Redis 키 조회 요청: pattern={}", pattern);
+    public Mono<Map<String, Object>> getAllKeys(@RequestParam(defaultValue = "*") String pattern) {
+        log.error("🚨🚨🚨 RedisDebugController - /keys 호출됨: pattern={}", pattern);
+        System.out.println("🚨🚨🚨 System.out.println - RedisDebugController - /keys 호출됨: pattern=" + pattern);
         
         return redisTemplate.keys(pattern)
-                .doOnNext(key -> log.debug("Redis 키 발견: {}", key))
-                .doOnComplete(() -> log.info("Redis 키 조회 완료"))
+                .collectList()
+                .map(keys -> {
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("pattern", pattern);
+                    result.put("keys", keys);
+                    result.put("count", keys.size());
+                    return result;
+                })
+                .doOnNext(result -> log.debug("Redis 키 조회 결과: {}", result))
                 .doOnError(error -> log.error("Redis 키 조회 실패: {}", error.getMessage(), error));
     }
 
