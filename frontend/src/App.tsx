@@ -112,7 +112,7 @@ function App() {
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification('KB EchoTimer', {
         body: '타이머가 완료되었습니다! 🎉',
-        icon: '/favicon.ico'
+        icon: '/favicon.svg'
       });
     }
   }, []);
@@ -127,7 +127,7 @@ function App() {
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification('KB EchoTimer', {
         body: `${accessedUserId}님이 공유 타이머에 접속했습니다!`,
-        icon: '/favicon.ico'
+        icon: '/favicon.svg'
       });
     }
   }, []);
