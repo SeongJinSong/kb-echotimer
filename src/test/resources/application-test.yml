@@ -1,0 +1,73 @@
+spring:
+  application:
+    name: kb-timer-service-test
+  
+  # 테스트용 MongoDB 설정 (Embedded MongoDB 사용)
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/timer_service_test
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 5
+          max-idle: 5
+          min-idle: 1
+          
+  # 테스트용 Kafka 설정
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: 1
+      retries: 1
+      batch-size: 1024
+      linger-ms: 1
+    consumer:
+      group-id: timer-service-test
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: true
+      auto-commit-interval: 100ms
+      properties:
+        spring.json.trusted.packages: "com.kb.timer.model.event"
+
+# 테스트용 서버 설정
+server:
+  port: 0 # 랜덤 포트 사용
+  instance:
+    id: test-server-${random.int(1000,9999)}
+
+# 테스트용 로깅 설정
+logging:
+  level:
+    com.kb.timer: DEBUG
+    org.springframework.kafka: WARN
+    org.springframework.data.mongodb: WARN
+    org.springframework.data.redis: WARN
+    org.springframework.test: INFO
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level [%logger{36}] - %msg%n"
+
+# 테스트용 커스텀 설정
+timer:
+  kafka:
+    topics:
+      timer-events: timer-events-test
+      user-actions: user-actions-test
+    partitions: 1
+    replication-factor: 1
+  redis:
+    connection-ttl: 60 # 1분 (테스트용 짧은 TTL)
+    heartbeat-interval: 5 # 5초
+  mongodb:
+    timestamp-ttl: 3600 # 1시간 (테스트용 짧은 TTL)
+
+# 액추에이터 비활성화 (테스트용)
+management:
+  endpoints:
+    enabled-by-default: false

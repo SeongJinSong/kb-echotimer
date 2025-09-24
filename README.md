@@ -411,6 +411,32 @@ npm run preview
 
 ## 🧪 테스트
 
+### 테스트 구조
+
+프로젝트는 **핵심 비즈니스 로직에 집중한 견고한 테스트 기반**을 제공합니다:
+
+#### ✅ 핵심 테스트 모듈
+
+1. **`TimerServiceTest`** (9개 테스트)
+   - 타이머 생성, 조회, 수정 로직
+   - 권한 관리 (소유자/뷰어)
+   - 시간 계산 정확성
+   - 타임스탬프 저장/조회
+
+2. **`KafkaEventPublisherTest`** (6개 테스트)
+   - Kafka 이벤트 발행 시스템
+   - 모든 이벤트 타입 검증
+
+3. **`RedisTTLSchedulerServiceTest`** (10개 테스트)
+   - Redis TTL 기반 스케줄링
+   - 타이머 완료 처리 로직
+
+4. **`TimerWebSocketControllerTest`** (4개 테스트)
+   - WebSocket 구독 기본 기능
+   - 사용자 ID 처리 로직
+
+### 테스트 실행
+
 ```bash
 # 전체 테스트 실행
 ./gradlew test
@@ -418,9 +444,18 @@ npm run preview
 # 특정 테스트 클래스 실행
 ./gradlew test --tests "com.kb.timer.service.TimerServiceTest"
 
+# 연속 실행 (실패해도 계속)
+./gradlew test --continue
+
 # 테스트 리포트 확인
 open build/reports/tests/test/index.html
 ```
+
+### 테스트 철학
+
+- **핵심 비즈니스 로직 우선**: 복잡한 통합 테스트보다 핵심 로직에 집중
+- **단위 테스트 중심**: Mock을 활용한 빠르고 안정적인 테스트
+- **실용적 접근**: 유지보수 비용과 테스트 가치의 균형
 
 ## 📊 모니터링 & 운영
 
