@@ -105,6 +105,14 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
    * 기존 타이머 로드
    */
   const loadTimer = useCallback(async (timerIdOrToken: string) => {
+    console.log('🔍 loadTimer 호출됨:', { timerIdOrToken, isShareToken, userId });
+    
+    // timerIdOrToken이 없으면 로드하지 않음
+    if (!timerIdOrToken) {
+      console.log('⚠️ loadTimer: timerIdOrToken이 없어서 로드하지 않음');
+      return;
+    }
+    
     setLoading(true);
     setError(null);
     
@@ -119,6 +127,36 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
         // 타이머 ID로 조회
         timerData = await TimerApiService.getTimerInfo(timerIdOrToken, userId);
       }
+      
+            // 타이머 데이터 유효성 체크
+            if (!timerData.timerId) {
+              console.log('⚠️ 유효하지 않은 타이머 응답 데이터:', timerData);
+              console.log('🔄 sessionStorage에서 타이머 ID 제거 및 초기화');
+              
+              // sessionStorage에서 타이머 관련 정보 제거
+              sessionStorage.removeItem('kb-echotimer-current-timer-id');
+              sessionStorage.removeItem('kb-echotimer-is-share-token');
+              
+              // 상태 초기화
+              setTimer(null);
+              currentTimerIdRef.current = null;
+              timerRef.current = null;
+              
+              // 부모 컴포넌트에 초기화 신호 전달 (App.tsx에서 처리)
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('timer-invalid', { 
+                  detail: { reason: 'invalid_response' } 
+                }));
+              }
+              
+              return;
+            }
+
+            // 완료된 타이머 체크 - 소유자와 공유자 모두 유지
+            if (timerData.completed) {
+              console.log('✅ 완료된 타이머 감지 - 유지:', timerData.timerId, 'userRole:', timerData.userRole);
+              // 소유자와 공유자 모두 완료된 타이머를 계속 볼 수 있음
+            }
       
       setTimer(timerData);
       currentTimerIdRef.current = timerData.timerId; // 실제 타이머 ID 사용
@@ -401,8 +439,28 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
    * 초기 타이머 로드
    */
   useEffect(() => {
+    console.log('🔍 useEffect - initialTimerId 체크:', { 
+      initialTimerId, 
+      hasInitialTimerId: !!initialTimerId, 
+      currentTimer: !!timer,
+      currentTimerIdRef: currentTimerIdRef.current 
+    });
+    
     if (initialTimerId) {
+      // initialTimerId가 있으면 로드
+      console.log('🔄 useEffect에서 loadTimer 호출:', initialTimerId);
       loadTimer(initialTimerId);
+    } else if (currentTimerIdRef.current && !timer) {
+      // initialTimerId는 없지만 ref에 타이머 ID가 있고 timer 상태가 없다면 복구 시도
+      console.log('🔄 ref에서 타이머 ID 복구 시도:', currentTimerIdRef.current);
+      loadTimer(currentTimerIdRef.current);
+    } else if (!initialTimerId && !currentTimerIdRef.current) {
+      // 둘 다 없다면 완전 초기화
+      console.log('🔄 타이머 상태 완전 초기화');
+      setTimer(null);
+      timerRef.current = null;
+    } else {
+      console.log('⚠️ useEffect - 조건에 맞지 않아 아무 작업 안함');
     }
   }, [initialTimerId, loadTimer]);
 

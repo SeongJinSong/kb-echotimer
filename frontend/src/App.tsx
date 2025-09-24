@@ -73,6 +73,17 @@ function App() {
     // sessionStorage에서 기존 타이머 ID 확인
     return sessionStorage.getItem('kb-echotimer-current-timer-id');
   });
+  
+  // 공유 토큰 여부를 상태로 관리 (sessionStorage에서 복원)
+  const [isShareToken, setIsShareToken] = useState(() => {
+    return sessionStorage.getItem('kb-echotimer-is-share-token') === 'true';
+  });
+
+  // isShareToken 상태 변경 시 sessionStorage에 저장
+  useEffect(() => {
+    sessionStorage.setItem('kb-echotimer-is-share-token', isShareToken.toString());
+  }, [isShareToken]);
+  
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
     message: string;
@@ -96,7 +107,8 @@ function App() {
     }
   }, []);
 
-  // URL에서 타이머 ID 추출 (공유 링크 지원)
+
+  // URL에서 타이머 ID 추출 및 새로고침 시 URL 복원
   useEffect(() => {
     const path = window.location.pathname;
     const urlParams = new URLSearchParams(window.location.search);
@@ -107,6 +119,7 @@ function App() {
       const shareToken = timerMatch[1];
       setCurrentTimerId(shareToken);
       sessionStorage.setItem('kb-echotimer-current-timer-id', shareToken);
+      setIsShareToken(true); // 공유 토큰으로 설정
       setShowCreator(false);
       return;
     }
@@ -116,6 +129,19 @@ function App() {
     if (timerIdFromUrl) {
       setCurrentTimerId(timerIdFromUrl);
       sessionStorage.setItem('kb-echotimer-current-timer-id', timerIdFromUrl);
+      setIsShareToken(false); // 일반 타이머 ID로 설정
+      setShowCreator(false);
+      return;
+    }
+    
+    // URL에 타이머 정보가 없지만 sessionStorage에 있는 경우 (새로고침 시)
+    const storedTimerId = sessionStorage.getItem('kb-echotimer-current-timer-id');
+    const storedIsShareToken = sessionStorage.getItem('kb-echotimer-is-share-token') === 'true';
+    
+    if (storedTimerId && storedIsShareToken && path === '/') {
+      // 공유 토큰인 경우 URL 복원
+      const shareUrl = `/timer/${storedTimerId}`;
+      window.history.replaceState({}, '', shareUrl);
       setShowCreator(false);
     }
   }, []);
@@ -133,6 +159,8 @@ function App() {
         icon: '/favicon.svg'
       });
     }
+    
+    // 자동 초기화 제거 - 사용자가 직접 선택하도록 함
   }, []);
 
   /**
@@ -167,10 +195,62 @@ function App() {
     timerId: currentTimerId || undefined,
     userId,
     autoConnect: true,
-    isShareToken: !!(currentTimerId && window.location.pathname.startsWith('/timer/')), // 공유 토큰 여부 명시
+    isShareToken: isShareToken, // 상태로 관리되는 공유 토큰 여부
     onTimerCompleted: handleTimerCompleted, // 타이머 완료 콜백 추가
     onSharedTimerAccessed: handleSharedTimerAccessed // 공유 타이머 접속 콜백 추가
   });
+
+  // 타이머 객체 디버깅
+  useEffect(() => {
+    console.log('🔍 타이머 객체 디버깅:', timer);
+    if (timer) {
+      console.log('🔍 ownerId:', timer.ownerId);
+      console.log('🔍 timerId:', timer.timerId);
+      console.log('🔍 전체 타이머 데이터:', JSON.stringify(timer, null, 2));
+    }
+  }, [timer]);
+
+  // 잘못된 타이머 응답 처리
+  useEffect(() => {
+    const handleTimerInvalid = (event: CustomEvent) => {
+      console.log('🚨🚨🚨 handleTimerInvalid 호출됨!', event.detail);
+      console.log('🚨 현재 currentTimerId:', currentTimerId);
+      console.log('🚨 현재 timer 상태:', timer);
+      
+      // 만약 정상적인 타이머가 이미 있다면 무시
+      if (timer && timer.timerId && !timer.completed) {
+        console.log('✅ 정상적인 타이머가 있어서 timer-invalid 이벤트 무시');
+        return;
+      }
+      
+      // sessionStorage 정리
+      sessionStorage.removeItem('kb-echotimer-current-timer-id');
+      sessionStorage.removeItem('kb-echotimer-is-share-token');
+      
+      // 상태 초기화
+      setCurrentTimerId(null);
+      setIsShareToken(false);
+      setShowCreator(true);
+      
+      // URL도 홈으로 변경
+      window.history.pushState({}, '', '/');
+      
+      // 이유에 따른 메시지 표시
+      if (event.detail?.reason === 'timer_completed') {
+        showSnackbar('타이머가 이미 완료되었습니다. 새 타이머를 생성해주세요.', 'info');
+      } else if (isShareToken) {
+        showSnackbar('공유 링크가 만료되었거나 존재하지 않습니다. 새 타이머를 생성해주세요.', 'info');
+      } else {
+        showSnackbar('타이머가 만료되었거나 존재하지 않습니다. 새 타이머를 생성해주세요.', 'info');
+      }
+    };
+
+    window.addEventListener('timer-invalid', handleTimerInvalid as EventListener);
+    
+    return () => {
+      window.removeEventListener('timer-invalid', handleTimerInvalid as EventListener);
+    };
+  }, []);
 
   // 공유 타이머 접속 알림은 이제 WebSocket 이벤트로 처리됨 (소유자에게만 표시)
 
@@ -189,19 +269,25 @@ function App() {
    */
   const handleCreateTimer = async (targetTimeSeconds: number) => {
     try {
+      // 기존 세션 정리
+      sessionStorage.removeItem('kb-echotimer-current-timer-id');
+      sessionStorage.removeItem('kb-echotimer-is-share-token');
+      setCurrentTimerId(null);
+      
       const newTimer = await createTimer(targetTimeSeconds);
-      setCurrentTimerId(newTimer.timerId);
-      sessionStorage.setItem('kb-echotimer-current-timer-id', newTimer.timerId);
       setShowCreator(false);
       showSnackbar('타이머가 생성되었습니다!', 'success');
+      
+      // 생성된 타이머 ID를 직접 사용 (공유 토큰 대신)
+      setCurrentTimerId(newTimer.timerId);
+      sessionStorage.setItem('kb-echotimer-current-timer-id', newTimer.timerId);
+      setIsShareToken(false); // 새로 생성된 타이머는 일반 타이머 ID
       
       // URL 업데이트 (공유 가능하도록)
       if (newTimer?.shareToken) {
         const token = newTimer.shareToken.replace('/timer/', '');
         const newUrl = `${window.location.origin}/timer/${token}`;
         window.history.pushState({}, '', newUrl);
-        // URL이 변경되면 sessionStorage도 업데이트
-        sessionStorage.setItem('kb-echotimer-current-timer-id', token);
       }
     } catch (err) {
       showSnackbar('타이머 생성에 실패했습니다.', 'error');
@@ -264,9 +350,15 @@ function App() {
    * 새 타이머 만들기
    */
   const handleNewTimer = () => {
-    setShowCreator(true);
+    // sessionStorage에서 타이머 관련 정보 제거
+    sessionStorage.removeItem('kb-echotimer-current-timer-id');
+    sessionStorage.removeItem('kb-echotimer-is-share-token');
+    // 상태 초기화
     setCurrentTimerId(null);
-    window.history.pushState({}, '', window.location.origin);
+    setIsShareToken(false); // 공유 토큰 상태도 초기화
+    setShowCreator(true);
+    // URL도 홈으로 변경
+    window.history.pushState({}, '', '/');
   };
 
   /**
@@ -376,7 +468,7 @@ function App() {
             <Box mt={3} textAlign="center">
               <Stack spacing={1} alignItems="center">
                 <Typography variant="body2" color="text.secondary">
-                  타이머 소유자: {timer.ownerId}
+                  타이머 소유자: {timer?.ownerId || '로딩 중...'}
                 </Typography>
                 <Typography variant="body2" color="primary.main" fontWeight="medium">
                   현재 사용자: {userId}
@@ -388,6 +480,27 @@ function App() {
               </Typography>
             </Box>
             
+            {/* 타이머 완료 시 추가 액션 */}
+            {isCompleted && (
+              <Box mt={3} textAlign="center">
+                <Typography variant="h6" color="success.main" gutterBottom>
+                  🎉 타이머가 완료되었습니다!
+                </Typography>
+                {/* 소유자에게만 새 타이머 시작 버튼 표시 */}
+                {timer.userRole === 'OWNER' && (
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    size="large"
+                    onClick={handleNewTimer}
+                    sx={{ mt: 2 }}
+                  >
+                    새 타이머 시작
+                  </Button>
+                )}
+              </Box>
+            )}
+
             {/* 타임스탬프 목록 */}
             <TimestampList 
               timerId={timer.timerId} 
