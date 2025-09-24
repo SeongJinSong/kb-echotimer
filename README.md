@@ -357,6 +357,18 @@ java -jar build/libs/kb-echotimer-1.0.0.jar
 - 📱 **반응형 디자인**: 모바일/데스크톱 모든 환경에서 최적화
 - 🌐 **URL 공유**: 브라우저 주소창을 통한 간편한 타이머 공유
 
+### 세션 영속성 및 복원 기능
+- 💾 **세션 유지**: sessionStorage 기반 탭별 사용자 상태 관리
+- 🔄 **URL 복원**: 공유자 새로고침 시 공유 링크 URL 자동 복원
+- 🧹 **스마트 정리**: 타이머 생성 시 이전 세션 자동 정리로 충돌 방지
+- ⚠️ **오류 처리**: 무효한 공유 링크 접속 시 적절한 안내 메시지
+
+### 견고한 상태 관리
+- 🔍 **실시간 검증**: API 응답 유효성 실시간 검증 및 자동 복구
+- 🎯 **정확한 라우팅**: 공유 토큰 vs 타이머 ID 자동 구분 처리
+- 🔄 **상태 동기화**: 프론트엔드-백엔드 상태 불일치 자동 감지 및 해결
+- 🛡️ **방어적 프로그래밍**: 예외 상황에 대한 포괄적 처리 및 사용자 안내
+
 ## 🛠️ 개발 가이드
 
 ### 프론트엔드 개발
@@ -663,6 +675,61 @@ grep "TimerCompletionEvent" logs/application.log
    # JVM 메모리 상태 확인
    curl http://localhost:8090/actuator/metrics/jvm.memory.used
    ```
+
+10. **프론트엔드 {scanAvailable: true} 응답 문제**
+    ```bash
+    # 문제: WebFlux Reactive Streams 메타데이터가 JSON에 포함됨
+    # 해결: ResponseEntity 제거, Flux → Mono<Map> 변경
+    
+    # API 응답 확인
+    curl http://localhost:8090/api/v1/timers/{timerId}
+    # 정상: {"timerId":"...", "targetTime":"..."}
+    # 비정상: {"scanAvailable":true, "prefetch":256}
+    
+    # 디버그 API 응답 확인
+    curl http://localhost:8090/api/v1/debug/redis/keys
+    # 정상: {"keys":["key1","key2"], "count":2}
+    # 비정상: {"scanAvailable":true}
+    ```
+
+11. **타이머 생성 후 초기화면 복귀 문제**
+    ```bash
+    # 문제: sessionStorage 충돌 및 isShareToken 상태 오류
+    # 해결: 타이머 생성 시 사전 정리 + 상태 관리 개선
+    
+    # 브라우저 개발자 도구에서 확인
+    sessionStorage.getItem('kb-echotimer-current-timer-id')
+    sessionStorage.getItem('kb-echotimer-is-share-token')
+    
+    # 로그 확인 (브라우저 콘솔)
+    # 정상: "isShareToken: false" → "GET /timers/{timerId}"
+    # 비정상: "isShareToken: true" → "GET /timers/shared/{timerId}" (404)
+    ```
+
+12. **공유자 새로고침 시 URL 유실 문제**
+    ```bash
+    # 문제: 공유 링크 접속 후 새로고침 시 홈으로 이동
+    # 해결: sessionStorage 기반 URL 복원 로직 추가
+    
+    # 정상 동작 확인
+    # 1. 공유 링크 접속: /timer/{shareToken}
+    # 2. 새로고침 → URL 유지: /timer/{shareToken}
+    # 3. sessionStorage 확인:
+    sessionStorage.getItem('kb-echotimer-is-share-token') // "true"
+    ```
+
+13. **무효한 공유 링크 접속 문제**
+    ```bash
+    # 문제: 이전 공유 링크로 접속 시 부적절한 처리
+    # 해결: 전용 오류 메시지 + 완전한 상태 초기화
+    
+    # 백엔드 로그 확인
+    grep "유효하지 않은 공유 링크" logs/application.log
+    
+    # 프론트엔드 동작 확인 (브라우저 콘솔)
+    # 정상: "공유 링크가 만료되었거나 존재하지 않습니다" 메시지 표시
+    # 자동으로 홈 화면 이동 및 sessionStorage 정리
+    ```
 
 ### 성능 최적화 팁
 
