@@ -35,11 +35,17 @@ public class ServerShutdownHandler {
             // 1. TTL 스케줄러 정리
             redisTTLSchedulerService.shutdown();
             
-            // 2. Redis 정리 작업 수행 (서버 종료 시에는 블로킹 허용)
-            cleanupServerRelatedKeys(serverId).block();
-            log.info("서버 종료 시 TTL 스케줄러 및 Redis 정리 완료: serverId={}", serverId);
+            // 2. Redis 정리 작업 수행 (비동기로 처리하여 블로킹 방지)
+            cleanupServerRelatedKeys(serverId)
+                .doOnSuccess(unused -> log.info("서버 종료 시 Redis 정리 완료: serverId={}", serverId))
+                .doOnError(error -> log.warn("서버 종료 시 Redis 정리 실패 (무시됨): serverId={}, error={}", 
+                          serverId, error.getMessage()))
+                .onErrorComplete() // 에러 발생 시 무시하고 계속 진행
+                .subscribe(); // 비동기 실행
+                
+            log.info("서버 종료 시 TTL 스케줄러 정리 완료: serverId={}", serverId);
         } catch (Exception e) {
-            log.error("서버 종료 시 Redis 정리 실패: serverId={}, error={}", serverId, e.getMessage(), e);
+            log.warn("서버 종료 시 정리 작업 실패 (무시됨): serverId={}, error={}", serverId, e.getMessage());
         }
     }
 
