@@ -16,13 +16,6 @@ import java.time.Instant;
 public interface TimerRepository extends ReactiveMongoRepository<Timer, String> {
     
     /**
-     * 소유자 ID로 타이머 목록 조회
-     * @param ownerId 소유자 ID
-     * @return 타이머 목록
-     */
-    Flux<Timer> findByOwnerIdOrderByCreatedAtDesc(String ownerId);
-    
-    /**
      * 공유 토큰으로 타이머 조회
      * @param shareToken 공유 토큰
      * @return 타이머
@@ -35,19 +28,4 @@ public interface TimerRepository extends ReactiveMongoRepository<Timer, String> 
      * @return 미완료 타이머 목록
      */
     Flux<Timer> findByCompletedFalseAndTargetTimeBefore(Instant targetTime);
-    
-    /**
-     * 완료된 타이머 목록 조회 (정리용)
-     * @param completedAt 완료 시간 기준
-     * @return 완료된 타이머 목록
-     */
-    Flux<Timer> findByCompletedTrueAndCompletedAtBefore(Instant completedAt);
-    
-    /**
-     * 특정 시간 범위의 미완료 타이머 조회 (복구용)
-     * @param startTime 시작 시간
-     * @param endTime 종료 시간
-     * @return 미완료 타이머 목록
-     */
-    Flux<Timer> findByCompletedFalseAndTargetTimeAfterAndTargetTimeBefore(Instant startTime, Instant endTime);
 }

@@ -95,7 +95,7 @@ public class TimerCompletionMonitoringService {
         }
         
         // 누락된 타이머들 에러 로그 출력
-        log.error("🚨 누락된 타이머 완료 처리 감지! 총 {}개 타이머", missedTimers.size());
+        log.error("누락된 타이머 완료 처리 감지! 총 {}개 타이머", missedTimers.size());
         
         for (Timer missedTimer : missedTimers) {
             Instant targetTime = missedTimer.getTargetTime();

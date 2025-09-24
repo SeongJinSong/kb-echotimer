@@ -1,21 +1,20 @@
 package com.kb.timer.service;
 
 import com.kb.timer.model.entity.TimerEventLog;
-import com.kb.timer.model.event.TimerEvent;
 import com.kb.timer.model.event.SharedTimerAccessedEvent;
+import com.kb.timer.model.event.TimerEvent;
 import com.kb.timer.repository.TimerEventLogRepository;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.kafka.core.reactive.ReactiveKafkaConsumerTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.kafka.receiver.KafkaReceiver;
 import reactor.kafka.receiver.ReceiverOptions;
 
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import java.time.Instant;
 
 /**

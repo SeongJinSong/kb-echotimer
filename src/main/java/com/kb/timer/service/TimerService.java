@@ -211,15 +211,13 @@ public class TimerService {
      * @return 타이머 정보
      */
     public Mono<TimerResponse> getTimerInfoByShareToken(String shareToken, String userId) {
-        log.error("🚨🚨🚨 TimerService - 공유 토큰으로 타이머 정보 조회: shareToken={}, userId={}", shareToken, userId);
-        System.out.println("🚨🚨🚨 System.out.println - TimerService - 공유 토큰으로 타이머 정보 조회: shareToken=" + shareToken + ", userId=" + userId);
+        log.debug("공유 토큰으로 타이머 정보 조회: shareToken={}, userId={}", shareToken, userId);
         Instant now = Instant.now();
         
         return timerRepository.findByShareToken(shareToken)
                 .switchIfEmpty(Mono.error(new RuntimeException("유효하지 않은 공유 링크입니다: " + shareToken)))
                 .flatMap(timer -> {
-                    log.error("🚨🚨🚨 TimerService - 타이머 찾음: {}", timer);
-                    System.out.println("🚨🚨🚨 System.out.println - TimerService - 타이머 찾음: " + timer);
+                    log.debug("타이머 찾음: timerId={}, targetTime={}", timer.getId(), timer.getTargetTime());
                     // 온라인 사용자 수 조회 (Redis)
                     return connectionManager.getOnlineUserCount(timer.getId())
                             .defaultIfEmpty(0L)

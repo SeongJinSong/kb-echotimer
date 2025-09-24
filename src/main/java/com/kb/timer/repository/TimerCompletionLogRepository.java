@@ -31,15 +31,6 @@ public interface TimerCompletionLogRepository extends ReactiveMongoRepository<Ti
     Flux<TimerCompletionLog> findByProcessingStartedAtAfter(Instant after);
     
     /**
-     * 성공적으로 처리된 타이머 ID 목록 조회 (특정 시간 범위)
-     * 
-     * @param startTime 시작 시간
-     * @param endTime 종료 시간
-     * @return 성공 처리된 타이머 ID 목록
-     */
-    Flux<TimerCompletionLog> findBySuccessTrueAndProcessingStartedAtBetween(Instant startTime, Instant endTime);
-    
-    /**
      * 성공적으로 처리된 완료 로그 조회 (특정 시간 이후)
      * 
      * @param after 기준 시간

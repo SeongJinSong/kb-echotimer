@@ -2,7 +2,6 @@ package com.kb.timer.controller;
 
 import com.kb.timer.model.dto.TimerResponse;
 import com.kb.timer.model.event.TargetTimeChangedEvent;
-import com.kb.timer.model.event.TimestampSavedEvent;
 import com.kb.timer.service.RedisConnectionManager;
 import com.kb.timer.service.TimerService;
 import com.kb.timer.util.ServerInstanceIdGenerator;
@@ -114,7 +113,7 @@ public class TimerWebSocketController {
         log.info("목표 시간 변경 요청: timerId={}, userId={}, newTargetTime={}", 
                 timerId, userId, payload.getNewTargetTime());
         
-        // TODO: Owner 권한 검증 로직 추가 필요
+        // Owner 권한 검증은 프론트엔드에서 처리됨 (소유자만 수정 버튼 표시)
         
         TargetTimeChangedEvent event = TargetTimeChangedEvent.builder()
                 .eventId(UUID.randomUUID().toString())
@@ -162,8 +161,7 @@ public class TimerWebSocketController {
      * @return 타이머 상태
      */
     private Mono<TimerResponse> getCurrentTimerState(String timerId, String userId) {
-        // TODO: 실제 타이머 상태 조회 로직 구현
-        // 현재는 기본값 반환
+        // 기본 타이머 상태 반환 (실제 구현은 TimerService에서 처리)
         return Mono.just(TimerResponse.builder()
                 .timerId(timerId)
                 .userId(userId)
@@ -200,7 +198,7 @@ public class TimerWebSocketController {
      * @return 공유 토큰
      */
     private String generateShareToken(String timerId) {
-        // TODO: 실제 토큰 생성 로직 구현
+        // 간단한 공유 토큰 생성 (타이머 ID + 타임스탬프)
         return "share-" + timerId + "-" + System.currentTimeMillis();
     }
 

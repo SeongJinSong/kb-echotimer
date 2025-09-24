@@ -84,38 +84,6 @@ public class RedisConnectionManager {
     }
     
     /**
-     * 사용자 연결 해제 처리
-     * WebSocket 연결 해제 시 호출
-     */
-    public Mono<SessionInfo> removeUserConnection(String sessionId) {
-        return redisTemplate.opsForValue().get("session:" + sessionId)
-            .cast(SessionInfo.class)
-            .flatMap(sessionInfo -> {
-                String timerId = sessionInfo.getTimerId();
-                String userId = sessionInfo.getUserId();
-                String serverId = sessionInfo.getServerId();
-                
-                return Mono.when(
-                    // 1. 타이머별 온라인 사용자에서 제거
-                    stringRedisTemplate.opsForSet().remove("timer:" + timerId + ":online_users", userId),
-                    
-                    // 2. 사용자별 서버 정보 삭제
-                    stringRedisTemplate.delete("user:" + userId + ":server"),
-                    
-                    // 3. 서버별 사용자 목록에서 제거
-                    stringRedisTemplate.opsForSet().remove("server:" + serverId + ":users", userId),
-                    
-                    // 4. 세션 정보 삭제
-                    redisTemplate.delete("session:" + sessionId)
-                ).thenReturn(sessionInfo)
-                 .doOnSuccess(ignored -> 
-                     log.debug("User connection removed: timerId={}, userId={}, serverId={}", 
-                         timerId, userId, serverId)
-                 );
-            });
-    }
-    
-    /**
      * 특정 타이머에 현재 서버가 관련되어 있는지 확인
      * Kafka Consumer에서 필터링용으로 사용하는 핵심 메서드
      */
@@ -151,39 +119,11 @@ public class RedisConnectionManager {
     }
     
     /**
-     * 특정 타이머에 연결된 서버 목록 조회
-     */
-    public Flux<String> getConnectedServers(String timerId) {
-        return getOnlineUsers(timerId)
-            .flatMap(userId -> 
-                stringRedisTemplate.opsForValue().get("user:" + userId + ":server")
-            )
-            .distinct();
-    }
-    
-    /**
      * 세션 정보 조회
      */
     public Mono<SessionInfo> getSessionInfo(String sessionId) {
         return redisTemplate.opsForValue().get("session:" + sessionId)
             .cast(SessionInfo.class);
-    }
-    
-    /**
-     * 하트비트 업데이트
-     * 클라이언트 연결 상태 확인용 + TTL 갱신
-     */
-    public Mono<Void> updateHeartbeat(String sessionId) {
-        return getSessionInfo(sessionId)
-            .flatMap(sessionInfo -> {
-                sessionInfo.setLastHeartbeat(Instant.now());
-                
-                // 세션 정보 업데이트 + TTL 갱신
-                return redisTemplate.opsForValue()
-                    .set("session:" + sessionId, sessionInfo, SESSION_TTL)
-                    .then(refreshUserTTL(sessionInfo.getTimerId(), sessionInfo.getUserId(), 
-                                       sessionInfo.getServerId(), sessionId));
-            });
     }
 
     /**

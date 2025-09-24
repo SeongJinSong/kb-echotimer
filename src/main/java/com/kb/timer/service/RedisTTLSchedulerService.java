@@ -2,26 +2,23 @@ package com.kb.timer.service;
 
 import com.kb.timer.model.entity.Timer;
 import com.kb.timer.model.entity.TimerCompletionLog;
-import com.kb.timer.model.event.TimerScheduleEvent;
 import com.kb.timer.model.event.TimerCompletionEvent;
+import com.kb.timer.model.event.TimerScheduleEvent;
 import com.kb.timer.repository.TimerCompletionLogRepository;
 import com.kb.timer.repository.TimerRepository;
 import com.kb.timer.util.ServerInstanceIdGenerator;
-import lombok.RequiredArgsConstructor;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.connection.Message;
-import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.listener.KeyExpirationEventMessageListener;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import java.time.Duration;
 import java.time.Instant;
 
@@ -285,65 +282,6 @@ public class RedisTTLSchedulerService extends KeyExpirationEventMessageListener 
         }
         
         return completionLogRepository.save(log).then();
-    }
-
-    /**
-     * 분산 락을 사용하여 타이머 완료 처리 (기존 메서드 - 호환성 유지)
-     * 
-     * @param timerId 타이머 ID
-     * @return 처리 결과
-     */
-    private Mono<Void> processTimerCompletionWithLock(String timerId) {
-        String lockKey = PROCESSING_LOCK_PREFIX + timerId;
-        String serverId = serverInstanceIdGenerator.getServerInstanceId();
-        
-        // 분산 락 획득 시도 (5분 TTL)
-        return stringRedisTemplate.opsForValue()
-                .setIfAbsent(lockKey, serverId, Duration.ofMinutes(5))
-                .flatMap(lockAcquired -> {
-                    if (lockAcquired) {
-                        log.info("✅ TTL 만료 타이머 처리 시작 (락 획득): timerId={}, serverId={}", timerId, serverId);
-                        
-                        // 타이머 완료 이벤트 발행 (동일 서버 내 TimerService에서 처리)
-                        eventPublisher.publishEvent(new TimerCompletionEvent(this, timerId));
-                        log.info("✅ TTL 만료 타이머 완료 이벤트 발행: timerId={}", timerId);
-                        return Mono.<Void>empty()
-                                .doOnSuccess(v -> log.info("✅ TTL 만료 타이머 완료 처리 성공: timerId={}", timerId))
-                                .doFinally(signalType -> {
-                                    // 처리 완료 후 락 해제
-                                    stringRedisTemplate.delete(lockKey)
-                                            .doOnNext(deleted -> log.debug("처리 락 해제: timerId={}, deleted={}", timerId, deleted))
-                                            .subscribe();
-                                });
-                    } else {
-                        log.debug("TTL 만료 타이머 처리 스킵 (다른 서버에서 처리 중): timerId={}", timerId);
-                        return Mono.empty();
-                    }
-                });
-    }
-
-    /**
-     * 특정 타이머가 스케줄되어 있는지 확인
-     * 
-     * @param timerId 타이머 ID
-     * @return 스케줄 여부
-     */
-    public Mono<Boolean> isTimerScheduled(String timerId) {
-        String scheduleKey = TIMER_SCHEDULE_PREFIX + timerId;
-        return stringRedisTemplate.hasKey(scheduleKey)
-                .doOnNext(exists -> log.debug("타이머 TTL 스케줄 존재 여부: timerId={}, exists={}", timerId, exists));
-    }
-
-    /**
-     * 현재 스케줄된 타이머 수 조회
-     * 
-     * @return 스케줄된 타이머 수
-     */
-    public Mono<Long> getScheduledTimerCount() {
-        String pattern = TIMER_SCHEDULE_PREFIX + "*";
-        return stringRedisTemplate.keys(pattern)
-                .count()
-                .doOnNext(count -> log.debug("현재 TTL 스케줄된 타이머 수: {}", count));
     }
 
     /**

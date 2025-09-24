@@ -31,8 +31,7 @@ public class RedisDebugController {
      */
     @GetMapping("/keys")
     public Mono<Map<String, Object>> getAllKeys(@RequestParam(defaultValue = "*") String pattern) {
-        log.error("🚨🚨🚨 RedisDebugController - /keys 호출됨: pattern={}", pattern);
-        System.out.println("🚨🚨🚨 System.out.println - RedisDebugController - /keys 호출됨: pattern=" + pattern);
+        log.debug("Redis 키 조회 요청: pattern={}", pattern);
         
         return redisTemplate.keys(pattern)
                 .collectList()
