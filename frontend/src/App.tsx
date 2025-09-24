@@ -60,12 +60,31 @@ function App() {
     return !existingTimerId;
   });
   const [userId] = useState(() => {
-    // sessionStorage에서 기존 사용자 ID 확인, 없으면 새로 생성
+    // 현재 타이머의 소유자 userId가 있는지 확인
+    const ownerUserId = sessionStorage.getItem('kb-echotimer-owner-user-id');
+    const currentTimerId = sessionStorage.getItem('kb-echotimer-current-timer-id');
+    const ownerTimerId = sessionStorage.getItem('kb-echotimer-owner-timer-id');
+    const isShareToken = sessionStorage.getItem('kb-echotimer-is-share-token') === 'true';
+    
+    console.log('🔍 userId 초기화:', { ownerUserId, currentTimerId, ownerTimerId, isShareToken });
+    
+    // 공유 토큰이 아니고, 현재 타이머가 소유자의 타이머이고, 소유자 userId가 있다면 그것을 사용
+    if (!isShareToken && currentTimerId && ownerTimerId && currentTimerId === ownerTimerId && ownerUserId) {
+      console.log('🔑 소유자 userId 복원:', ownerUserId);
+      // 소유자 userId를 일반 userId로도 저장 (일관성 유지)
+      sessionStorage.setItem('kb-echotimer-user-id', ownerUserId);
+      return ownerUserId;
+    }
+    
+    // 일반적인 경우: sessionStorage에서 기존 사용자 ID 확인, 없으면 새로 생성
     const existingUserId = sessionStorage.getItem('kb-echotimer-user-id');
     if (existingUserId) {
+      console.log('🔄 기존 userId 사용:', existingUserId);
       return existingUserId;
     }
+    
     const newUserId = `user-${Date.now()}`;
+    console.log('🆕 새 userId 생성:', newUserId);
     sessionStorage.setItem('kb-echotimer-user-id', newUserId);
     return newUserId;
   });
@@ -185,7 +204,6 @@ function App() {
     error,
     connected,
     createTimer,
-    loadTimer,
     saveTimestamp,
     completeTimer,
     remainingSeconds,
@@ -226,6 +244,8 @@ function App() {
       // sessionStorage 정리
       sessionStorage.removeItem('kb-echotimer-current-timer-id');
       sessionStorage.removeItem('kb-echotimer-is-share-token');
+      sessionStorage.removeItem('kb-echotimer-owner-timer-id'); // 소유자 타이머 ID도 정리
+      sessionStorage.removeItem('kb-echotimer-owner-user-id'); // 소유자 사용자 ID도 정리
       
       // 상태 초기화
       setCurrentTimerId(null);
@@ -272,11 +292,17 @@ function App() {
       // 기존 세션 정리
       sessionStorage.removeItem('kb-echotimer-current-timer-id');
       sessionStorage.removeItem('kb-echotimer-is-share-token');
+      sessionStorage.removeItem('kb-echotimer-owner-timer-id'); // 소유자 타이머 ID도 정리
+      sessionStorage.removeItem('kb-echotimer-owner-user-id'); // 소유자 사용자 ID도 정리
       setCurrentTimerId(null);
       
       const newTimer = await createTimer(targetTimeSeconds);
       setShowCreator(false);
       showSnackbar('타이머가 생성되었습니다!', 'success');
+      
+      // 소유자 정보 저장 (소유자 확인용)
+      sessionStorage.setItem('kb-echotimer-owner-timer-id', newTimer.timerId);
+      sessionStorage.setItem('kb-echotimer-owner-user-id', userId);
       
       // 생성된 타이머 ID를 직접 사용 (공유 토큰 대신)
       setCurrentTimerId(newTimer.timerId);
@@ -350,9 +376,10 @@ function App() {
    * 새 타이머 만들기
    */
   const handleNewTimer = () => {
-    // sessionStorage에서 타이머 관련 정보 제거
+    // sessionStorage에서 타이머 관련 정보 모두 제거
     sessionStorage.removeItem('kb-echotimer-current-timer-id');
     sessionStorage.removeItem('kb-echotimer-is-share-token');
+    sessionStorage.removeItem('kb-echotimer-owner-timer-id'); // 소유자 타이머 ID도 정리
     // 상태 초기화
     setCurrentTimerId(null);
     setIsShareToken(false); // 공유 토큰 상태도 초기화
@@ -404,15 +431,10 @@ function App() {
       setShowTargetTimeDialog(false);
       setNewTargetTime('');
       
-      // 타이머 정보 수동 새로고침
-      if (currentTimerId) {
-        await loadTimer(currentTimerId);
-      } else if (timer.timerId) {
-        // currentTimerId가 없으면 timer.timerId로 시도
-        await loadTimer(timer.timerId);
-      }
+      // 🔄 수동 새로고침 제거: TARGET_TIME_CHANGED 이벤트가 자동으로 타이머를 새로고침함
+      console.log('✅ 기준시각 변경 완료 - WebSocket 이벤트로 자동 새로고침됨');
       
-      // 타임스탬프 목록도 새로고침
+      // 타임스탬프 목록만 새로고침
       setTimestampRefreshTrigger(prev => prev + 1);
     } catch (err) {
       console.error('기준 시각 변경 실패:', err);

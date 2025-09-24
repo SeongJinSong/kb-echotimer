@@ -119,14 +119,26 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
     try {
       let timerData;
       
+      console.log('🔍 API 호출 전 상태:', { 
+        timerIdOrToken, 
+        isShareToken, 
+        userId,
+        'timerIdOrToken 길이': timerIdOrToken.length,
+        'UUID 형태인가': /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(timerIdOrToken)
+      });
+      
       // 공유 토큰 여부 확인
       if (isShareToken) {
+        console.log('📤 공유 토큰으로 API 호출:', timerIdOrToken);
         // 공유 토큰으로 조회
         timerData = await TimerApiService.getTimerInfoByShareToken(timerIdOrToken, userId);
       } else {
+        console.log('📤 타이머 ID로 API 호출:', timerIdOrToken);
         // 타이머 ID로 조회
         timerData = await TimerApiService.getTimerInfo(timerIdOrToken, userId);
       }
+      
+      console.log('📥 API 응답:', timerData);
       
             // 타이머 데이터 유효성 체크
             if (!timerData.timerId) {
@@ -174,6 +186,53 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
       setLoading(false);
     }
   }, [userId, connected, handleError, isShareToken]);
+
+  /**
+   * 타이머 ID로 강제 로드 (항상 타이머 ID API 사용)
+   */
+  const loadTimerById = useCallback(async (timerId: string) => {
+    console.log('🔍 loadTimerById 호출됨:', { timerId, userId });
+    
+    if (!timerId) {
+      console.log('⚠️ loadTimerById: timerId가 없어서 로드하지 않음');
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      console.log('📤 타이머 ID로 강제 API 호출:', timerId);
+      // 항상 타이머 ID로 조회
+      const timerData = await TimerApiService.getTimerInfo(timerId, userId);
+      
+      console.log('📥 API 응답:', timerData);
+      
+      // 타이머 데이터 유효성 체크
+      if (!timerData.timerId) {
+        console.log('⚠️ 유효하지 않은 타이머 응답 데이터:', timerData);
+        handleError(new Error('Invalid timer response'), '타이머 로드 (강제 타이머 ID)');
+        return;
+      }
+      
+      // 타이머 상태 업데이트
+      setTimer(timerData);
+      timerRef.current = timerData;
+      currentTimerIdRef.current = timerData.timerId;
+      
+      // WebSocket 구독 (이미 구독 중이면 무시됨)
+      if (connected && webSocketService) {
+        webSocketService.subscribeToTimer(timerData.timerId, userId);
+      }
+      
+      console.log('✅ 타이머 로드 완료 (강제 타이머 ID):', timerData.timerId);
+    } catch (err) {
+      console.error('❌ 타이머 로드 실패 (강제 타이머 ID):', err);
+      handleError(err as Error, '타이머 로드 (강제 타이머 ID)');
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, connected, handleError, webSocketService]);
 
   /**
    * 타임스탬프 저장
@@ -265,11 +324,15 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
       case 'TARGET_TIME_CHANGED':
         // 목표 시간이 변경되었을 때 타이머 정보 새로고침
         console.log('🔄 목표 시간 변경 이벤트 수신:', event);
-        if (currentTimerIdRef.current) {
-          console.log('🔄 타이머 정보 새로고침 시작:', currentTimerIdRef.current);
+        if (event.timerId) {
+          console.log('🔄 타이머 정보 새로고침 시작 (이벤트의 타이머 ID 사용):', event.timerId);
+          // TARGET_TIME_CHANGED 이벤트에서는 항상 타이머 ID로 API 호출
+          loadTimerById(event.timerId);
+        } else if (currentTimerIdRef.current) {
+          console.log('🔄 타이머 정보 새로고침 시작 (currentTimerIdRef 사용):', currentTimerIdRef.current);
           loadTimer(currentTimerIdRef.current);
         } else {
-          console.log('❌ currentTimerIdRef.current가 없음');
+          console.log('❌ 타이머 ID를 찾을 수 없음');
         }
         break;
         
