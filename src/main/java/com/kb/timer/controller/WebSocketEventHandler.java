@@ -83,6 +83,7 @@ public class WebSocketEventHandler {
             
             // Redis에서 사용자 연결 정보 제거
             redisConnectionManager.removeUserConnection(sessionInfo.timerId, sessionInfo.userId)
+                    .then(redisConnectionManager.removeSessionById(sessionId)) // 세션 ID로 직접 삭제 (cost 낮음)
                     .then(timerService.publishUserLeftEvent(sessionInfo.timerId, sessionInfo.userId))
                     .doOnSuccess(ignored -> log.info("연결 해제 처리 완료: sessionId={}, timerId={}, userId={}", 
                             sessionId, sessionInfo.timerId, sessionInfo.userId))
@@ -90,13 +91,33 @@ public class WebSocketEventHandler {
                             sessionId, sessionInfo.timerId, sessionInfo.userId, error.getMessage(), error))
                     .subscribe();
         } else {
-            log.warn("세션 추적 정보 없음: sessionId={}", sessionId);
+            log.warn("메모리에서 세션 추적 정보 없음: sessionId={}", sessionId);
             
-            // 세션 정보가 없는 경우 일반적인 정리 작업만 수행
-            redisConnectionManager.cleanupExpiredConnections()
-                    .doOnSuccess(ignored -> log.info("일반 연결 해제 처리 완료: sessionId={}", sessionId))
-                    .doOnError(error -> log.error("일반 연결 해제 처리 실패: sessionId={}, error={}", 
-                            sessionId, error.getMessage(), error))
+            // Redis에서 세션 정보 조회 시도
+            redisConnectionManager.getSessionInfo(sessionId)
+                    .flatMap(redisSessionInfo -> {
+                        log.info("Redis에서 세션 정보 발견: sessionId={}, timerId={}, userId={}", 
+                                sessionId, redisSessionInfo.getTimerId(), redisSessionInfo.getUserId());
+                        
+                        // Redis에서 사용자 연결 정보 제거
+                        return redisConnectionManager.removeUserConnection(
+                                redisSessionInfo.getTimerId(), redisSessionInfo.getUserId())
+                                .then(redisConnectionManager.removeSessionById(sessionId)) // 세션 ID로 직접 삭제 (cost 낮음)
+                                .then(timerService.publishUserLeftEvent(
+                                        redisSessionInfo.getTimerId(), redisSessionInfo.getUserId()));
+                    })
+                    .doOnSuccess(ignored -> log.info("Redis 기반 연결 해제 처리 완료: sessionId={}", sessionId))
+                    .doOnError(error -> {
+                        log.warn("Redis에서도 세션 정보 없음 또는 처리 실패: sessionId={}, error={}", 
+                                sessionId, error.getMessage());
+                        
+                        // 일반적인 정리 작업 수행
+                        redisConnectionManager.cleanupExpiredConnections()
+                                .doOnSuccess(ignored2 -> log.info("일반 연결 해제 처리 완료: sessionId={}", sessionId))
+                                .doOnError(error2 -> log.error("일반 연결 해제 처리 실패: sessionId={}, error={}", 
+                                        sessionId, error2.getMessage(), error2))
+                                .subscribe();
+                    })
                     .subscribe();
         }
     }
