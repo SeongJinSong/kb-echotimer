@@ -166,17 +166,30 @@ function App() {
   }, []);
 
   /**
-   * 타이머 완료 알림 핸들러
+   * 타이머 완료 알림 핸들러 (소유자/공유자 구분하여 표시)
    */
-  const handleTimerCompleted = useCallback(() => {
-    showSnackbar('🎉 타이머가 완료되었습니다!', 'success');
+  const handleTimerCompleted = useCallback((isOwner: boolean): void => {
+    console.log('🎉 타이머 완료 핸들러 호출됨 - 소유자:', isOwner);
     
-    // 브라우저 알림 (권한이 있는 경우)
+    if (isOwner) {
+      // 소유자: 스낵바 알림
+      console.log('👑 소유자에게 스낵바 알림 표시');
+      showSnackbar('🎉 타이머가 완료되었습니다!', 'success');
+    } else {
+      // 공유자: alert 알림
+      console.log('👥 공유자에게 alert 알림 표시');
+      alert('🎉 타이머가 완료되었습니다!');
+    }
+    
+    // 브라우저 알림 (권한이 있는 경우) - 모든 사용자에게 표시
     if ('Notification' in window && Notification.permission === 'granted') {
+      console.log('🔔 브라우저 알림 표시');
       new Notification('KB EchoTimer', {
         body: '타이머가 완료되었습니다! 🎉',
         icon: '/favicon.svg'
       });
+    } else {
+      console.log('❌ 브라우저 알림 권한 없음 또는 지원 안함');
     }
     
     // 자동 초기화 제거 - 사용자가 직접 선택하도록 함

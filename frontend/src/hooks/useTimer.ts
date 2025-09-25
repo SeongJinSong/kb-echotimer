@@ -13,7 +13,7 @@ export interface UseTimerOptions {
   userId: string;
   autoConnect?: boolean; // WebSocket 자동 연결 여부
   isShareToken?: boolean; // 공유 토큰 여부
-  onTimerCompleted?: () => void; // 타이머 완료 콜백 추가
+  onTimerCompleted?: (isOwner: boolean) => void; // 타이머 완료 콜백 (소유자 여부 전달)
   onSharedTimerAccessed?: (accessedUserId: string) => void; // 공유 타이머 접속 콜백 추가
 }
 
@@ -55,6 +55,7 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
   const currentTimerIdRef = useRef<string | null>(initialTimerId || null);
   const intervalRef = useRef<number | null>(null);
   const timerRef = useRef<TimerResponse | null>(null);
+  const hasNotifiedCompletion = useRef<boolean>(false); // 완료 알림 중복 방지
 
   /**
    * 에러 처리 헬퍼
@@ -82,6 +83,10 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
       setTimer(newTimer);
       currentTimerIdRef.current = newTimer.timerId;
       timerRef.current = newTimer; // ref에도 저장
+      
+      // 완료 알림 상태 초기화 (새로운 타이머 생성 시)
+      hasNotifiedCompletion.current = false;
+      console.log('🔄 완료 알림 상태 초기화 (새 타이머 생성)');
       
       // WebSocket 구독 시작
       console.log('🔄 타이머 생성 후 구독 시도 - connected:', connected, 'timerId:', newTimer.timerId);
@@ -173,6 +178,10 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
       setTimer(timerData);
       currentTimerIdRef.current = timerData.timerId; // 실제 타이머 ID 사용
       timerRef.current = timerData; // ref에도 저장
+      
+      // 완료 알림 상태 초기화 (새로운 타이머 로드 시)
+      hasNotifiedCompletion.current = false;
+      console.log('🔄 완료 알림 상태 초기화');
       
       // WebSocket 구독 시작
       if (connected) {
@@ -352,17 +361,37 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
         break;
         
       case 'TIMER_COMPLETED':
-        // 타이머가 완료되었을 때
-        console.log('🎉 타이머 완료:', event);
+        // 타이머가 완료되었을 때 (소유자/공유자 구분하여 알림 표시)
+        console.log('🎉 타이머 완료 이벤트 수신:', event);
+        console.log('👤 현재 사용자 ID:', userId);
+        console.log('📊 현재 타이머 상태:', timerRef.current);
+        console.log('🔔 완료 알림 표시 여부:', hasNotifiedCompletion.current);
+        
         if (timerRef.current) {
           const updatedTimer = { ...timerRef.current, completed: true };
           setTimer(updatedTimer);
           timerRef.current = updatedTimer;
           
-          // 완료 콜백 호출 (알림 표시 등)
-          if (onTimerCompleted) {
-            onTimerCompleted();
+          // 완료 알림이 아직 표시되지 않은 경우에만 처리
+          if (!hasNotifiedCompletion.current) {
+            hasNotifiedCompletion.current = true; // 완료 알림 표시됨을 기록
+            
+            // 소유자 여부 확인
+            const isOwner = timerRef.current.ownerId === userId;
+            console.log('👑 소유자 여부:', isOwner, '소유자 ID:', timerRef.current.ownerId, '현재 사용자 ID:', userId);
+            
+            // 완료 콜백 호출 (소유자/공유자 구분하여 알림 표시)
+            if (onTimerCompleted) {
+              console.log('📞 서버 측 타이머 완료 콜백 호출 중... (소유자:', isOwner, ')');
+              onTimerCompleted(isOwner);
+            } else {
+              console.log('❌ 타이머 완료 콜백이 없음');
+            }
+          } else {
+            console.log('⚠️ 이미 완료 알림이 표시되어 중복 처리 방지');
           }
+        } else {
+          console.log('❌ 타이머 상태가 없어서 완료 처리 불가');
         }
         break;
         
@@ -434,12 +463,24 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
       setRemainingSeconds(remaining);
       
       // 타이머가 완료되었을 때 (한 번만 실행)
-      if (remaining === 0 && !timer.completed && !hasCompletedOnce) {
+      if (remaining === 0 && !hasCompletedOnce && !hasNotifiedCompletion.current) {
         hasCompletedOnce = true;
+        hasNotifiedCompletion.current = true; // 완료 알림 표시됨을 기록
         
-        // 완료 콜백 호출 (알림 표시 등)
+        console.log('🎉 클라이언트 측 타이머 완료 감지');
+        console.log('👤 현재 사용자 ID:', userId);
+        console.log('📊 타이머 정보:', timer);
+        
+        // 소유자 여부 확인
+        const isOwner = timer.ownerId === userId;
+        console.log('👑 소유자 여부:', isOwner, '소유자 ID:', timer.ownerId, '현재 사용자 ID:', userId);
+        
+        // 완료 콜백 호출 (소유자/공유자 구분하여 알림 표시)
         if (onTimerCompleted) {
-          onTimerCompleted();
+          console.log('📞 클라이언트 측 타이머 완료 콜백 호출 중... (소유자:', isOwner, ')');
+          onTimerCompleted(isOwner);
+        } else {
+          console.log('❌ 클라이언트 측 타이머 완료 콜백이 없음');
         }
         
         completeTimer();
@@ -457,7 +498,7 @@ export function useTimer(options: UseTimerOptions): UseTimerReturn {
         clearInterval(intervalRef.current);
       }
     };
-  }, [timer, completeTimer, onTimerCompleted]);
+  }, [timer, userId, onTimerCompleted, completeTimer]);
 
   /**
    * WebSocket 연결 상태 관리
