@@ -38,6 +38,71 @@ WebSocket을 통한 실시간 동기화와 Kafka를 이용한 이벤트 스트�
 - **STOMP.js** - WebSocket 클라이언트
 - **Axios** - HTTP 클라이언트
 
+## 🚀 빠른 시작
+
+### 필수 요구사항
+
+- **Java 21** 이상
+- **Node.js 18** 이상
+- **Docker & Docker Compose** (로컬 개발용)
+
+### 1. 프로젝트 클론
+
+```bash
+git clone <repository-url>
+cd kb-echotimer
+```
+
+### 2. 로컬 인프라 실행 (Docker Compose)
+
+```bash
+# Kafka, MongoDB, Redis 실행
+docker-compose up -d
+```
+
+### 3. 개발 모드 실행
+
+#### 방법 1: IntelliJ IDEA (권장)
+```bash
+# 1. IntelliJ IDEA에서 프로젝트 열기
+# 2. TimerApplication.java 실행 (Run/Debug)
+# 3. Run Configuration 설정으로 프론트엔드 실행
+#    - Run → Edit Configurations
+#    - + → npm
+#    - Name: Frontend Dev
+#    - Package.json: frontend/package.json
+#    - Command: run
+#    - Scripts: dev
+#    - Working directory: frontend
+# 4. 설정한 Run Configuration으로 실행 (npm install 자동 실행됨)
+```
+
+#### 방법 2: 통합 실행
+```bash
+# 백엔드 + 프론트엔드 개발 서버 동시 실행
+./gradlew bootRun
+
+# 별도 터미널에서 프론트엔드 개발 서버 실행
+./gradlew npmDev
+```
+
+#### 방법 3: 개별 실행
+```bash
+# 백엔드만 실행
+./gradlew bootRun
+
+# 프론트엔드만 실행 (별도 터미널, npm install 자동 실행됨)
+cd frontend
+npm run dev
+```
+
+### 4. 접속
+
+- **프론트엔드**: http://localhost:3000
+- **백엔드 API**: http://localhost:8090/api/v1
+- **WebSocket**: ws://localhost:8090/ws
+- **Actuator**: http://localhost:8090/actuator
+
 ## 🎯 핵심 아키텍처 설계
 
 ### 1. 분산 타이머 스케줄링 시스템
@@ -111,7 +176,210 @@ Before: 서버 크래시 → 좀비 키 영구 잔존 → 수동 정리 필요
 After:  서버 크래시 → 최대 2시간 후 자동 정리 → 완전 자동화
 ```
 
-### 6. 이벤트 기반 아키텍처 (순환 의존성 해결)
+### 6. Redis 키 구조 및 사용자 행동 시나리오
+
+#### Redis 키 구조
+```
+timer:{timerId}:online_users -> SET {userId1, userId2, ...} (TTL: 30분)
+user:{userId}:connected_server_id -> STRING (serverId) (TTL: 1시간)
+user:{userId}:sessions -> SET {sessionId1, sessionId2, ...} (TTL: 2시간)
+server:{serverId}:users -> SET {userId1, userId2, ...} (TTL: 45분)
+session:{sessionId} -> OBJECT (SessionInfo) (TTL: 2시간)
+```
+
+#### 사용자 행동에 따른 Redis 키 변화
+
+##### 🆕 **시나리오 1: 새로운 타이머 생성**
+```
+사용자 A가 25분 타이머 생성
+```
+
+**Redis 키 생성:**
+```redis
+# 1. 타이머별 온라인 사용자 목록
+SADD timer:abc123:online_users user-A
+EXPIRE timer:abc123:online_users 1800  # 30분 TTL
+
+# 2. 사용자별 연결 서버 정보
+SET user:user-A:connected_server_id server-001
+EXPIRE user:user-A:connected_server_id 3600  # 1시간 TTL
+
+# 3. 서버별 연결된 사용자 목록
+SADD server:server-001:users user-A
+EXPIRE server:server-001:users 2700  # 45분 TTL
+
+# 4. 세션 정보
+SET session:ws-session-001 {timerId: "abc123", userId: "user-A", serverId: "server-001", ...}
+EXPIRE session:ws-session-001 7200  # 2시간 TTL
+
+# 5. 사용자별 세션 인덱스
+SADD user:user-A:sessions ws-session-001
+EXPIRE user:user-A:sessions 7200  # 2시간 TTL
+```
+
+##### 🔗 **시나리오 2: 공유 링크로 다른 사용자 접속**
+```
+사용자 B가 공유 링크로 접속
+```
+
+**Redis 키 변화:**
+```redis
+# 1. 기존 사용자 A의 세션 인덱스 정리
+DEL user:user-A:sessions
+
+# 2. 타이머에 사용자 B 추가
+SADD timer:abc123:online_users user-B
+EXPIRE timer:abc123:online_users 1800
+
+# 3. 사용자 B의 서버 정보
+SET user:user-B:connected_server_id server-001
+EXPIRE user:user-B:connected_server_id 3600
+
+# 4. 서버에 사용자 B 추가
+SADD server:server-001:users user-B
+EXPIRE server:server-001:users 2700
+
+# 5. 사용자 B의 세션 정보
+SET session:ws-session-002 {timerId: "abc123", userId: "user-B", serverId: "server-001", ...}
+EXPIRE session:ws-session-002 7200
+
+# 6. 사용자 B의 세션 인덱스
+SADD user:user-B:sessions ws-session-002
+EXPIRE user:user-B:sessions 7200
+```
+
+**결과:**
+- `timer:abc123:online_users` = `{user-A, user-B}`
+- `server:server-001:users` = `{user-A, user-B}`
+- 각 사용자별로 개별 세션 관리
+
+##### 🔄 **시나리오 3: 새로고침 (F5)**
+```
+사용자 A가 브라우저 새로고침
+```
+
+**Redis 키 변화:**
+```redis
+# 1. 기존 세션 정리 (연결 해제 시)
+DEL session:ws-session-001
+DEL user:user-A:sessions
+
+# 2. 타이머에서 사용자 A 제거
+SREM timer:abc123:online_users user-A
+
+# 3. 사용자 A의 서버 정보 삭제
+DEL user:user-A:connected_server_id
+
+# 4. 서버에서 사용자 A 제거
+SREM server:server-001:users user-A
+
+# 5. 새로운 세션 생성 (재연결 시)
+SET session:ws-session-003 {timerId: "abc123", userId: "user-A", serverId: "server-001", ...}
+EXPIRE session:ws-session-003 7200
+
+# 6. 새로운 세션 인덱스
+SADD user:user-A:sessions ws-session-003
+EXPIRE user:user-A:sessions 7200
+
+# 7. 타이머에 사용자 A 다시 추가
+SADD timer:abc123:online_users user-A
+EXPIRE timer:abc123:online_users 1800
+```
+
+**결과:**
+- 기존 세션은 즉시 삭제 (메모리 효율성)
+- 새로운 세션으로 재연결
+- 타이머 상태는 유지
+
+##### 🚪 **시나리오 4: 브라우저 탭 닫기**
+```
+사용자 B가 브라우저 탭을 닫음
+```
+
+**Redis 키 변화:**
+```redis
+# 1. 세션 즉시 삭제
+DEL session:ws-session-002
+
+# 2. 사용자 B의 세션 인덱스 삭제
+DEL user:user-B:sessions
+
+# 3. 타이머에서 사용자 B 제거
+SREM timer:abc123:online_users user-B
+
+# 4. 사용자 B의 서버 정보 삭제
+DEL user:user-B:connected_server_id
+
+# 5. 서버에서 사용자 B 제거
+SREM server:server-001:users user-B
+```
+
+**결과:**
+- `timer:abc123:online_users` = `{user-A}` (사용자 B 제거)
+- `server:server-001:users` = `{user-A}` (사용자 B 제거)
+- 사용자 A에게 "사용자 B가 나갔습니다" 알림
+
+##### ⏰ **시나리오 5: 타이머 완료**
+```
+25분 후 타이머 완료
+```
+
+**Redis 키 변화:**
+```redis
+# 1. 타이머 TTL 만료 (자동)
+# timer:abc123:schedule 키가 만료되어 Keyspace Notification 발생
+
+# 2. 모든 관련 키 TTL 갱신 (하트비트 중단으로 점진적 만료)
+# timer:abc123:online_users -> 30분 후 만료
+# user:user-A:sessions -> 2시간 후 만료
+# session:ws-session-003 -> 2시간 후 만료
+```
+
+**결과:**
+- 타이머 완료 이벤트가 Kafka를 통해 모든 서버에 전파
+- WebSocket을 통해 모든 사용자에게 알림
+- 소유자: 스낵바 알림, 공유자: alert 알림
+
+##### 🏢 **시나리오 6: 서버 재시작**
+```
+서버가 재시작됨
+```
+
+**Redis 키 변화:**
+```redis
+# 1. 메모리 기반 sessionTracker 초기화
+# (서버 재시작으로 메모리 상태 손실)
+
+# 2. Redis 키는 TTL에 의해 자동 정리
+# timer:abc123:online_users -> 30분 후 만료
+# user:user-A:sessions -> 2시간 후 만료
+# session:ws-session-003 -> 2시간 후 만료
+```
+
+**결과:**
+- 서버 재시작으로 WebSocket 연결 끊어짐
+- 클라이언트가 자동 재연결 시도
+- Redis 키는 TTL에 의해 자동 정리되어 메모리 누수 방지
+
+#### 키 관리 최적화 전략
+
+##### ✅ **유지하는 것들**
+- **세션 ID로 직접 삭제**: `removeSessionById(sessionId)` - cost가 낮고 메모리 효율적
+- **사용자별 세션 인덱스**: `user:{userId}:sessions` - 빠른 세션 조회
+- **TTL 기반 자동 정리**: 모든 키에 적절한 TTL 설정
+
+##### ❌ **제거한 것들**
+- **`KEYS` 명령어**: Redis 서버 부하 방지
+- **패턴 매칭 스캔**: 불필요한 복잡성 제거
+- **다른 타이머에서 사용자 제거**: 과도한 정리 로직 제거
+
+##### 🎯 **성능 최적화 효과**
+- **Redis 부하 감소**: `KEYS` 명령어 제거로 서버 블로킹 방지
+- **메모리 효율성**: 연결 해제 시 즉시 세션 삭제
+- **확장성**: 사용자 수 증가에 따른 성능 저하 없음
+- **안정성**: TTL 기반 자동 정리로 메모리 누수 방지
+
+### 7. 이벤트 기반 아키텍처 (순환 의존성 해결)
 ```
 ApplicationEventPublisher 기반 느슨한 결합 설계
 서비스 간 직접 의존성 제거 + 확장 가능한 이벤트 시스템
@@ -209,57 +477,6 @@ kb-echotimer/
 └── build.gradle                        # 빌드 설정
 ```
 
-## 🚀 시작하기
-
-### 필수 요구사항
-
-- **Java 21** 이상
-- **Node.js 18** 이상
-- **Docker & Docker Compose** (로컬 개발용)
-
-### 1. 프로젝트 클론
-
-```bash
-git clone <repository-url>
-cd kb-echotimer
-```
-
-### 2. 로컬 인프라 실행 (Docker Compose)
-
-```bash
-# Kafka, MongoDB, Redis 실행
-docker-compose up -d
-```
-
-### 3. 개발 모드 실행
-
-#### 방법 1: 통합 실행 (권장)
-```bash
-# 백엔드 + 프론트엔드 개발 서버 동시 실행
-./gradlew bootRun
-
-# 별도 터미널에서 프론트엔드 개발 서버 실행
-./gradlew npmDev
-```
-
-#### 방법 2: 개별 실행
-```bash
-# 백엔드만 실행
-./gradlew bootRun
-
-# 프론트엔드만 실행 (별도 터미널)
-cd frontend
-npm install
-npm run dev
-```
-
-### 4. 접속
-
-- **프론트엔드**: http://localhost:3000
-- **백엔드 API**: http://localhost:8090/api/v1
-- **WebSocket**: ws://localhost:8090/ws
-- **Actuator**: http://localhost:8090/actuator
-
 ## 🔧 빌드 및 배포
 
 ### 프로덕션 빌드
@@ -293,10 +510,8 @@ java -jar build/libs/kb-echotimer-1.0.0.jar
 | `POST` | `/api/v1/timers` | 새 타이머 생성 |
 | `GET` | `/api/v1/timers/{timerId}` | 타이머 정보 조회 |
 | `GET` | `/api/v1/timers/shared/{shareToken}` | 공유 타이머 조회 |
-| `PUT` | `/api/v1/timers/{timerId}/target-time` | 목표 시간 변경 |
 | `POST` | `/api/v1/timers/{timerId}/timestamps` | 타임스탬프 저장 |
 | `GET` | `/api/v1/timers/{timerId}/history` | 타이머 히스토리 조회 |
-| `GET` | `/api/v1/timers/{timerId}/users/{userId}/history` | 사용자별 히스토리 조회 |
 
 #### 모니터링 & 디버깅
 | 메서드 | 엔드포인트 | 설명 |
@@ -316,8 +531,8 @@ java -jar build/libs/kb-echotimer-1.0.0.jar
 |--------|------|
 | `/topic/timer/{timerId}` | 타이머 이벤트 구독 |
 | `/app/timer/{timerId}/save` | 타임스탬프 저장 |
-| `/app/timer/{timerId}/change-target` | 목표 시간 변경 |
-| `/app/timer/{timerId}/complete` | 타이머 완료 |
+| `/app/timer/{timerId}/change-target` | 목표 시간 변경 (소유자만) |
+| `/app/timer/{timerId}/complete` | 타이머 완료 알림 |
 
 ### WebSocket 이벤트 타입
 
@@ -328,7 +543,6 @@ java -jar build/libs/kb-echotimer-1.0.0.jar
 | `USER_JOINED` | 사용자 접속 | 모든 참여자 |
 | `USER_LEFT` | 사용자 퇴장 | 모든 참여자 |
 | `TIMER_COMPLETED` | 타이머 완료 | 모든 참여자 |
-| `ONLINE_USER_COUNT_UPDATED` | 온라인 사용자 수 업데이트 | 모든 참여자 |
 | `SHARED_TIMER_ACCESSED` | 공유 타이머 접속 | 타이머 소유자만 |
 
 ## 🎨 사용자 경험 (UX) 특징

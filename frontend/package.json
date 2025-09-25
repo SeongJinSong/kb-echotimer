@@ -4,7 +4,8 @@
   "description": "KB EchoTimer Frontend - React TypeScript Client",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "npm run install-if-needed && vite",
+    "install-if-needed": "node -e \"if (!require('fs').existsSync('node_modules')) { console.log('Installing dependencies...'); require('child_process').execSync('npm install', {stdio: 'inherit'}); }\"",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
